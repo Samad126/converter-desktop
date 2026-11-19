@@ -1,0 +1,31 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  build:
+    name: build + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    steps:
+      # The app depends on converter-core by sibling path (see Cargo.toml), so both repos sit side by side.
+      - uses: actions/checkout@v4
+        with: { path: desktop }
+      - uses: actions/checkout@v4
+        with: { repository: Samad126/converter-core, path: core }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop }
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig-dev \
+            libfreetype-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-shape0-dev libasound2-dev
+      - run: cargo build
+        working-directory: desktop
+      - run: cargo test
+        working-directory: desktop
