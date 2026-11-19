@@ -19,7 +19,7 @@ pub struct Settings {
     pub autostart: bool,
 }
 
-impl Default for Settings { fn default() -> Self { Self { output_dir: None, overwrite: false, ring: true, autostart: false } } }
+impl Default for Settings { fn default() -> Self { Self { output_dir: None, overwrite: false, ring: cfg!(target_os = "linux"), autostart: false } } }
 
 pub fn config_dir() -> PathBuf {
     std::env::var_os("CONVERTER_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("converter"))
@@ -69,11 +69,11 @@ mod tests {
 
     #[test] fn defaults_are_conservative() {
         let s = Settings::default();
-        assert!(s.output_dir.is_none() && !s.overwrite && s.ring && !s.autostart);
+        assert!(s.output_dir.is_none() && !s.overwrite && s.ring == cfg!(target_os = "linux") && !s.autostart);
     }
     #[test] fn partial_or_unknown_json_still_loads() {
         let s: Settings = serde_json::from_str(r#"{"overwrite": true, "from_a_future_version": 1}"#).unwrap();
-        assert!(s.overwrite && s.ring, "missing keys fall back to defaults");
+        assert!(s.overwrite && s.ring == Settings::default().ring, "missing keys fall back to defaults");
         assert!(serde_json::from_str::<Settings>("not json").is_err());
     }
     #[test] fn roundtrip_through_the_file() {

@@ -273,10 +273,14 @@ fn start_background(cx: &mut App) -> bool {
     settings::RING_ENABLED.store(ring_on, std::sync::atomic::Ordering::Relaxed);
     let tray_ok = match tray::start(tx.clone(), ring_on) { Ok(()) => true, Err(e) => { eprintln!("no tray icon ({e}); closing the window will quit"); false } };
     let tx2 = tx.clone();
-    if let Err(e) = gesture::listen(move |g| { let _ = tx2.send(AppEvent::Gesture(g)); }) { eprintln!("quick-convert ring disabled: {e}"); }
+    // Global hooks are only installed when the ring is wanted (security software dislikes idle keyboard hooks).
+    if ring_on || cfg!(target_os = "linux") {
+        if let Err(e) = gesture::listen(move |g| { let _ = tx2.send(AppEvent::Gesture(g)); }) { eprintln!("quick-convert ring disabled: {e}"); }
+    }
     let cfg = Arc::new(Config::default());
     cx.spawn(async move |cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(20)).await;
+        tray::pump(); // menu items may only be touched from the main thread (Windows/macOS)
         while let Ok(ev) = rx.try_recv() {
             let cfg = cfg.clone();
             let _ = cx.update(|cx| match ev {

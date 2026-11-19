@@ -145,6 +145,43 @@ mod x11 {
     }
 }
 
+/// Windows and macOS: `rdev` (low-level mouse/keyboard hooks / an event tap). The modifier is Ctrl on Windows and Option
+/// on macOS. macOS needs the Accessibility permission; without it the listener cannot start and says so.
+#[cfg(any(windows, target_os = "macos"))]
+mod rdev_backend {
+    use super::*;
+    use rdev::{Button, EventType, Key};
+
+    pub fn translate(held: &mut bool, pos: &mut (f64, f64), ev: &EventType) -> Option<Raw> {
+        let is_mod = |k: &Key| if cfg!(target_os = "macos") { matches!(k, Key::Alt | Key::AltGr) } else { matches!(k, Key::ControlLeft | Key::ControlRight) };
+        match ev {
+            EventType::KeyPress(k) if is_mod(k) => { *held = true; None }
+            EventType::KeyRelease(k) if is_mod(k) => { *held = false; None }
+            EventType::KeyPress(Key::Tab) => Some(Raw::Key { key: super::Key::Tab }),
+            EventType::KeyPress(Key::Escape) => Some(Raw::Key { key: super::Key::Escape }),
+            EventType::KeyPress(_) => Some(Raw::Key { key: super::Key::Other }),
+            EventType::MouseMove { x, y } => { *pos = (*x, *y); Some(Raw::Motion { x: *x as i32, y: *y as i32, ctrl: *held }) }
+            EventType::ButtonPress(Button::Left) => Some(Raw::ButtonPress { button: 1, x: pos.0 as i32, y: pos.1 as i32, ctrl: *held }),
+            EventType::ButtonRelease(Button::Left) => Some(Raw::ButtonRelease { button: 1 }),
+            // Wheel up = previous page, down = next (the same buttons X11 reports).
+            EventType::Wheel { delta_y, .. } if *delta_y != 0 => Some(Raw::ButtonPress { button: if *delta_y > 0 { 4 } else { 5 }, x: pos.0 as i32, y: pos.1 as i32, ctrl: *held }),
+            _ => None,
+        }
+    }
+
+    pub fn listen(mut on_gesture: impl FnMut(Gesture) + Send + 'static) -> Result<(), String> {
+        std::thread::Builder::new().name("gesture".into()).spawn(move || {
+            let (mut machine, mut held, mut pos) = (Machine::default(), false, (0.0, 0.0));
+            let r = rdev::listen(move |event| {
+                if let Some(g) = translate(&mut held, &mut pos, &event.event_type).and_then(|raw| machine.feed(raw)) { on_gesture(g); }
+            });
+            if let Err(e) = r {
+                eprintln!("gesture listener stopped: {e:?}{}", if cfg!(target_os = "macos") { " (grant Converter the Accessibility permission in System Settings > Privacy & Security)" } else { "" });
+            }
+        }).map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
 /// Starts the global listener on its own thread. Returns an error string when the platform cannot do it
 /// (Wayland, missing RECORD extension, unsupported OS) so the UI can say so instead of silently doing nothing.
 pub fn listen(on_gesture: impl FnMut(Gesture) + Send + 'static) -> Result<(), String> {
@@ -158,8 +195,10 @@ pub fn listen(on_gesture: impl FnMut(Gesture) + Send + 'static) -> Result<(), St
         }).map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(target_os = "linux"))]
-    { let _ = on_gesture; Err("Ctrl+drag is not available on this platform yet.".into()) }
+    #[cfg(any(windows, target_os = "macos"))]
+    { rdev_backend::listen(on_gesture) }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    { let _ = on_gesture; Err("Ctrl+drag is not available on this platform.".into()) }
 }
 
 #[cfg(test)]
@@ -205,5 +244,21 @@ mod tests {
         assert_eq!(m.feed(Raw::Key { key: Key::Other }), None);
         assert_eq!(m.feed(Raw::Key { key: Key::Escape }), Some(Gesture::Cancel));
         assert_eq!(m.feed(Raw::ButtonRelease { button: 1 }), None, "cancelled gesture does not also report a release");
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test] fn rdev_events_become_the_same_gestures_as_on_x11() {
+        use rdev::{Button, EventType, Key as RKey};
+        let modk = if cfg!(target_os = "macos") { RKey::Alt } else { RKey::ControlLeft };
+        let mut m = Machine::default();
+        let (mut held, mut pos) = (false, (0.0, 0.0));
+        let mut feed = |e: EventType| rdev_backend::translate(&mut held, &mut pos, &e).and_then(|r| m.feed(r));
+        assert_eq!(feed(EventType::MouseMove { x: 100.0, y: 100.0 }), None);
+        assert_eq!(feed(EventType::KeyPress(modk)), None);
+        assert_eq!(feed(EventType::ButtonPress(Button::Left)), None);
+        assert_eq!(feed(EventType::MouseMove { x: 130.0, y: 105.0 }), Some(Gesture::Open { x: 130, y: 105 }));
+        assert_eq!(feed(EventType::KeyPress(RKey::Tab)), Some(Gesture::Page(1)));
+        assert_eq!(feed(EventType::Wheel { delta_x: 0, delta_y: -1 }), Some(Gesture::Page(1)));
+        assert_eq!(feed(EventType::ButtonRelease(Button::Left)), Some(Gesture::Released));
     }
 }

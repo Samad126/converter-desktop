@@ -16,6 +16,15 @@ dirs = "6"
 # gpui 0.2.2 pulls `zed-xim`, whose input-method handler panics on a non-UTF-8 commit string (patched to fall
 # back to Latin-1), and `xattr 0.2.3`, which no longer compiles on Linux against recent `libc`
 # (ENOATTR was removed there). The vendored copy maps it to ENODATA; nothing else changed.
+# Windows and macOS: tray icon and the global Ctrl/Option+drag listener. Compile-checked in CI; not yet exercised on real
+# hardware (see README), so the ring is off by default there.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tray-icon = "0.26"
+rdev = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+
 [dev-dependencies]
 xim = { package = "zed-xim", version = "0.4.0-zed" }
 

@@ -70,10 +70,73 @@ mod imp {
 pub use imp::{set_ring, start};
 
 #[cfg(not(target_os = "linux"))]
-pub fn set_ring(_on: bool) {}
+pub use other::{pump, set_ring, start};
 
-#[cfg(not(target_os = "linux"))]
-pub fn start(_tx: Sender<AppEvent>, _ring: bool) -> Result<(), String> { Err("the tray is not implemented on this platform yet".into()) }
+/// Windows and macOS: `tray-icon`. The icon must be created on the main thread (we are on it, inside gpui's launch
+/// callback) and kept alive there; menu clicks arrive on a global channel that a helper thread forwards to the app.
+#[cfg(any(windows, target_os = "macos"))]
+mod other {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::Mutex;
+    use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+    use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+    struct Held { _icon: TrayIcon, ring: CheckMenuItem }
+    thread_local! { static HELD: RefCell<Option<Held>> = const { RefCell::new(None) }; }
+    static PENDING_RING: Mutex<Option<bool>> = Mutex::new(None);
+
+    /// ARGB (our icon) → RGBA (what tray-icon wants).
+    fn rgba_icon() -> Result<Icon, String> {
+        let argb = icon_argb(32);
+        let rgba: Vec<u8> = argb.chunks(4).flat_map(|p| [p[1], p[2], p[3], p[0]]).collect();
+        Icon::from_rgba(rgba, 32, 32).map_err(|e| e.to_string())
+    }
+
+    pub fn start(tx: Sender<AppEvent>, ring: bool) -> Result<(), String> {
+        let (open, ring_item, quit) = (MenuItem::new("Open Converter", true, None), CheckMenuItem::new("Quick-convert ring (Ctrl/Option+drag)", true, ring, None), MenuItem::new("Quit", true, None));
+        let menu = Menu::new();
+        menu.append_items(&[&open, &PredefinedMenuItem::separator(), &ring_item, &PredefinedMenuItem::separator(), &quit]).map_err(|e| e.to_string())?;
+        let icon = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Converter").with_icon(rgba_icon()?).build().map_err(|e| e.to_string())?;
+        let (open_id, ring_id, quit_id) = (open.id().clone(), ring_item.id().clone(), quit.id().clone());
+        HELD.with(|h| *h.borrow_mut() = Some(Held { _icon: icon, ring: ring_item.clone() }));
+        let tx_menu = tx.clone();
+        std::thread::Builder::new().name("tray-menu".into()).spawn(move || {
+            for ev in MenuEvent::receiver() {
+                let msg = if ev.id == open_id { AppEvent::OpenMain } else if ev.id == quit_id { AppEvent::Quit }
+                    else if ev.id == ring_id { AppEvent::SetRing(ring_item.is_checked()) } else { continue };
+                if tx_menu.send(msg).is_err() { break; }
+            }
+        }).map_err(|e| e.to_string())?;
+        std::thread::Builder::new().name("tray-click".into()).spawn(move || {
+            for ev in TrayIconEvent::receiver() {
+                if let TrayIconEvent::Click { button: tray_icon::MouseButton::Left, button_state: tray_icon::MouseButtonState::Up, .. } = ev {
+                    if tx.send(AppEvent::OpenMain).is_err() { break; }
+                }
+            }
+        }).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Called by the Settings page (any thread): remembered, applied on the main thread by `pump`.
+    pub fn set_ring(on: bool) { *PENDING_RING.lock().unwrap() = Some(on); }
+
+    /// Call regularly from the main thread: applies queued changes to menu items (they are not thread-safe).
+    pub fn pump() {
+        if let Some(on) = PENDING_RING.lock().unwrap().take() { HELD.with(|h| if let Some(h) = h.borrow().as_ref() { h.ring.set_checked(on); }); }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+mod other {
+    use super::*;
+    pub fn start(_tx: Sender<AppEvent>, _ring: bool) -> Result<(), String> { Err("the tray is not available on this platform".into()) }
+    pub fn set_ring(_on: bool) {}
+    pub fn pump() {}
+}
+
+#[cfg(target_os = "linux")]
+pub fn pump() {}
 
 #[cfg(test)]
 mod tests {
