@@ -40,6 +40,9 @@ pub fn spawn(path: PathBuf, target: String, progress: ProgressFn) -> tokio::task
     })
 }
 
+/// What the Install button calls an engine (the raw name for most; `python` is the bundled Python + packages).
+pub fn engine_label(name: &str) -> String { if name == "python" { "Python tools".into() } else { name.to_string() } }
+
 /// Shows `path` in the system file manager (selects it where the platform supports that).
 pub fn reveal(path: &std::path::Path) {
     #[cfg(target_os = "macos")]

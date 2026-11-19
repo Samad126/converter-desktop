@@ -152,7 +152,7 @@ impl gpui::Render for PdfPage {
             Status::Failed(msg, engine) => {
                 let name = engine.as_deref().and_then(converter_core::engines::tool).map(|t| t.name);
                 div().flex().flex_col().gap_1().child(div().text_sm().text_color(ERR).child(msg.clone()))
-                    .when_some(name, |d, name| d.child(div().flex().child(button("pdf-install", format!("Install {name}"), true).on_click(cx.listener(move |_, _, _, cx| cx.emit(PdfEvent::Install(name)))))))
+                    .when_some(name, |d, name| d.child(div().flex().child(button("pdf-install", format!("Install {}", crate::jobs::engine_label(name)), true).on_click(cx.listener(move |_, _, _, cx| cx.emit(PdfEvent::Install(name)))))))
             }
         };
 

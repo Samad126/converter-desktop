@@ -16,10 +16,16 @@ and pass on each). **Only Linux/X11 has been run by hand**; the rest is compile-
 | | Linux (X11) | Windows | macOS |
 |---|---|---|---|
 | Convert / PDF tools / Engines / Settings pages | tested | builds | builds |
-| Quick-convert ring (Ctrl+drag) | tested | not implemented | not implemented |
-| Tray icon, run-in-background | tested (Cinnamon) | not implemented | not implemented |
-| Start with the computer | tested | not implemented | not implemented |
-| Engine downloads | pandoc, qpdf, 7zip, yt-dlp, ffmpeg, **Calibre** | pandoc, qpdf, yt-dlp, ffmpeg, LibreOffice, **Calibre** | pandoc, qpdf, 7zip, yt-dlp, LibreOffice, **Calibre** |
+| Quick-convert ring (Ctrl/Option+drag) | tested | implemented, off by default, **never run on real hardware** | implemented, off by default, **never run on real hardware** (needs Accessibility permission) |
+| Tray icon, run-in-background | tested (Cinnamon) | implemented (`tray-icon`), compile-checked only | implemented (`tray-icon`), compile-checked only |
+| Start with the computer | tested | registry `Run` key (CI-tested against a throwaway key) | LaunchAgent plist (file logic unit-tested) |
+| Engine downloads | pandoc, qpdf, 7zip, yt-dlp, ffmpeg, Calibre, **Python tools** | pandoc, qpdf, yt-dlp, ffmpeg, LibreOffice, Calibre, **Python tools** | pandoc, qpdf, 7zip, yt-dlp, LibreOffice, Calibre, **Python tools** |
+
+**One install, no prerequisites.** The conversion core is compiled into the app. What used to need separate installs
+(Python and its packages for PDF -> Word/PowerPoint/Excel, Parquet, fonts, compare, redact) is one in-app button:
+*Python tools* downloads a private portable Python (~70 MB) and pip-installs the packages into the app's own folder
+(~750 MB on disk), checked on all three platforms in CI. LibreOffice (Windows/macOS) and Calibre are in-app downloads
+too. Still from your package manager on Linux: LibreOffice, Tesseract (OCR), heif, assimp.
 
 Without a tray, closing the window quits the app. Release packages (binary + the Python scripts it looks for next
 to itself) are built by the *Release build* workflow: run it manually for downloadable artifacts, or push a `v*` tag

@@ -229,7 +229,7 @@ impl Converter {
                     let engine = engine.clone();
                     div().flex().flex_col().gap_1().child(div().text_sm().text_color(ERR).child(msg.clone()))
                         .child(div().flex().gap_2()
-                            .when_some(engine.and_then(|e| engines::tool(&e).map(|t| t.name)), |d, name| d.child(button(SharedString::from(format!("inst{i}")), format!("Install {name}"), true)
+                            .when_some(engine.and_then(|e| engines::tool(&e).map(|t| t.name)), |d, name| d.child(button(SharedString::from(format!("inst{i}")), format!("Install {}", jobs::engine_label(name)), true)
                                 .on_click(cx.listener(move |t, _, _, cx| { t.page = Page::Engines; t.install(name, cx); t.jobs[i].status = Status::Idle; cx.notify(); }))))
                             .child(button(SharedString::from(format!("retry{i}")), "Try again", false).on_click(cx.listener(move |t, _, _, cx| { t.jobs[i].status = Status::Idle; cx.notify(); })))).into_any_element()
                 }
