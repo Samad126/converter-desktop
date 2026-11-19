@@ -1211,6 +1211,7 @@ dependencies = [
  "converter-core",
  "gpui",
  "tokio",
+ "x11rb",
 ]
 
 [[package]]

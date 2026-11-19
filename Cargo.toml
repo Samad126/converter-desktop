@@ -14,3 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # (ENOATTR was removed there). The vendored copy maps it to ENODATA; nothing else changed.
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# XRecord = read global pointer/keyboard events without a window (pure Rust, no extra system libraries).
+x11rb = { version = "0.13", default-features = false, features = ["record"] }

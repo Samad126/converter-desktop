@@ -1,4 +1,7 @@
 //! Converter desktop app (gpui). Screens: Convert (drop files, pick a target) and Engines.
+mod gesture;
+mod jobs;
+mod ring;
 mod runtime;
 mod theme;
 
@@ -6,7 +9,7 @@ use converter_core::{
     engines::{self, manager},
     formats,
     progress::{Progress, ProgressFn},
-    Config, ConvertOptions, ErrorCode,
+    Config, ErrorCode,
 };
 use gpui::{
     div, prelude::*, px, relative, App, Application, Bounds, Context, ExternalPaths, FontWeight, SharedString, TitlebarOptions, Window,
@@ -59,20 +62,7 @@ impl Converter {
         }
     }
 
-    /// Targets for a file: documents/images/data from the matrix, or audio/video from the media matrix.
-    fn targets_for(ext: &str) -> Vec<(String, String)> {
-        let m = formats::matrix();
-        let mut v: Vec<(String, String)> = formats::targets_for(ext).iter().filter_map(|id| m.targets.get(id).map(|t| (id.clone(), t.label.clone()))).collect();
-        for id in converter_core::media::media_targets_for(ext) { if let Some(t) = m.media.get(id) { v.push((format!("media:{id}"), t.label.clone())); } }
-        v
-    }
-
-    /// The engine a target needs, if it is not installed yet.
-    fn missing_engine(&self, ext: &str, target: &str) -> Option<&'static str> {
-        let tool = if target.starts_with("media:") { "ffmpeg" } else { engines::required_tool(formats::resolve_conversion(ext, target)?.engine)? };
-        let t = engines::tool(tool)?;
-        engines::resolve(t, &self.cfg, None).is_none().then_some(t.name)
-    }
+    fn missing_engine(&self, ext: &str, target: &str) -> Option<&'static str> { jobs::missing_engine(&self.cfg, ext, target) }
 
     fn convert(&mut self, idx: usize, target: String, cx: &mut Context<Self>) {
         let (path, ext) = { let j = &self.jobs[idx]; (j.path.clone(), j.ext.clone()) };
@@ -87,13 +77,7 @@ impl Converter {
         let frac = Arc::new(Mutex::new(None::<f32>));
         let f2 = frac.clone();
         let progress: ProgressFn = Arc::new(move |p| if let Progress::Fraction(f) = p { *f2.lock().unwrap() = Some(f); });
-        let handle = runtime::get().spawn(async move {
-            let opts = ConvertOptions::default();
-            match target.strip_prefix("media:") {
-                Some(id) => converter_core::media::convert_media(&cfg, &path, id, opts, progress).await,
-                None => converter_core::convert_file(&cfg, &path, &target, opts).await.map(|mut v| v.remove(0)),
-            }
-        });
+        let handle = jobs::spawn(cfg, path, target, progress);
         // Poll the shared fraction while the job runs, then deliver the result.
         cx.spawn(async move |this, cx| {
             while !handle.is_finished() {
@@ -178,7 +162,7 @@ impl Converter {
             let name = j.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let body = match &j.status {
                 Status::Idle => {
-                    let targets = Self::targets_for(&j.ext);
+                    let targets = jobs::targets_for(&j.ext);
                     if targets.is_empty() { div().text_sm().text_color(MUTED).child(format!("{} files can't be converted.", if j.ext.is_empty() { "These".into() } else { j.ext.clone() })).into_any_element() }
                     else { div().flex().flex_wrap().gap_1().children(targets.into_iter().map(|(id, label)| {
                         let missing = self.missing_engine(&j.ext, &id).is_some();
@@ -231,8 +215,40 @@ impl Converter {
     }
 }
 
+/// Runs the global Ctrl+drag listener and turns its events into ring windows.
+fn start_ring_gesture(cx: &mut App) {
+    let (tx, rx) = std::sync::mpsc::channel::<gesture::Gesture>();
+    if let Err(e) = gesture::listen(move |g| { let _ = tx.send(g); }) { eprintln!("quick-convert ring disabled: {e}"); return; }
+    let cfg = Arc::new(Config::default());
+    cx.spawn(async move |cx| loop {
+        cx.background_executor().timer(std::time::Duration::from_millis(20)).await;
+        while let Ok(g) = rx.try_recv() {
+            let cfg = cfg.clone();
+            let _ = cx.update(|cx| match g {
+                gesture::Gesture::Open { x, y } => ring::open(x, y, cfg, cx),
+                gesture::Gesture::Page(d) => { if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) { let _ = h.update(cx, |r, _, cx| r.flip(d, cx)); } }
+                gesture::Gesture::Cancel => ring::close(cx),
+                gesture::Gesture::Released => {
+                    // The drop (if any) is being delivered right now; give it a moment before closing an unused ring.
+                    if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) {
+                        cx.spawn(async move |cx| {
+                            cx.background_executor().timer(std::time::Duration::from_millis(700)).await;
+                            let _ = cx.update(|cx| { if h.update(cx, |r, _, _| r.is_idle()).unwrap_or(false) { ring::close(cx); } });
+                        }).detach();
+                    }
+                }
+            });
+        }
+    }).detach();
+}
+
 fn main() {
+    // `--debug-gesture`: print what the global Ctrl+drag listener sees (for troubleshooting).
+    if std::env::args().nth(1).as_deref() == Some("--debug-gesture") {
+        match gesture::listen(|g| println!("{g:?}")) { Ok(()) => loop { std::thread::sleep(std::time::Duration::from_secs(3600)) }, Err(e) => { eprintln!("{e}"); std::process::exit(1) } }
+    }
     Application::new().run(|cx: &mut App| {
+        start_ring_gesture(cx);
         let bounds = Bounds::centered(None, gpui::size(px(980.), px(660.)), cx);
         cx.open_window(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
