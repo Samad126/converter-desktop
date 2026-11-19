@@ -32,6 +32,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ag-psd"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6470c6a2f96a00a8d4154504020b34807c2282438c98f90f5069ef3f8cb0e7bf"
+dependencies = [
+ "flate2",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1187,6 +1196,7 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 name = "converter-core"
 version = "0.1.0"
 dependencies = [
+ "ag-psd",
  "clap",
  "dirs 6.0.0",
  "flate2",
