@@ -238,7 +238,7 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions { title: Some("Converter".into()), ..Default::default() }),
             ..Default::default()
-        }, |_, cx| cx.new(|_| Converter::new())).expect("could not open the window");
+        }, |_, cx| cx.new(|_| { let mut c = Converter::new(); c.add_files(&std::env::args_os().skip(1).map(PathBuf::from).collect::<Vec<_>>()); c })).expect("could not open the window");
         cx.activate(true);
     });
 }
