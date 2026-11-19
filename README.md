@@ -9,6 +9,22 @@ Early. Working: the Ctrl+drag quick-convert ring (below), tray, PDF tools page, 
 Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
 verification). Planned: PDF tools screens, settings, autostart, Windows/macOS builds.
 
+## Platforms
+CI builds and unit-tests every push on Linux, Windows and macOS (gpui, the core library and the app all compile
+and pass on each). **Only Linux/X11 has been run by hand**; the rest is compile-and-test verified, not click-tested.
+
+| | Linux (X11) | Windows | macOS |
+|---|---|---|---|
+| Convert / PDF tools / Engines / Settings pages | tested | builds | builds |
+| Quick-convert ring (Ctrl+drag) | tested | not implemented | not implemented |
+| Tray icon, run-in-background | tested (Cinnamon) | not implemented | not implemented |
+| Start with the computer | tested | not implemented | not implemented |
+| Engine downloads | pandoc, qpdf, 7zip, yt-dlp, ffmpeg | pandoc, qpdf, yt-dlp, ffmpeg | pandoc, qpdf, 7zip, yt-dlp |
+
+Without a tray, closing the window quits the app. Release packages (binary + the Python scripts it looks for next
+to itself) are built by the *Release build* workflow: run it manually for downloadable artifacts, or push a `v*` tag
+to attach them to a GitHub pre-release. macOS builds are unsigned (right-click → Open the first time).
+
 ## Quick-convert ring
 Hold **Ctrl**, drag files out of a file manager, and a ring of format chips opens under the cursor. Drop on a
 chip to convert (result saved next to the original); **Tab** or the **scroll wheel** shows more formats, **Esc**
