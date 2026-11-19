@@ -10,11 +10,15 @@ use std::path::PathBuf;
 
 pub enum PdfEvent { Install(&'static str) }
 
+/// The list on the left has the form-driven tools, then two special ones with their own panels.
+#[derive(Clone, Copy, PartialEq)]
+enum Special { Form, Compare }
+
 enum Field { Text(Entity<TextField>), Choice(String) }
 
 enum Status { Idle, Running, Done(Vec<PathBuf>), Failed(String, Option<String>) }
 
-pub struct PdfPage { selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
+pub struct PdfPage { special: Option<Special>, form: Entity<crate::pdf_extra::FormPanel>, compare: Entity<crate::pdf_extra::ComparePanel>, selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
 
 impl EventEmitter<PdfEvent> for PdfPage {}
 
@@ -24,7 +28,9 @@ fn button(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, primar
 
 impl PdfPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut s = Self { selected: 0, files: vec![], fields: vec![], status: Status::Idle };
+        let form = cx.new(|_| crate::pdf_extra::FormPanel::new());
+        let compare = cx.new(|_| crate::pdf_extra::ComparePanel::new());
+        let mut s = Self { special: None, form, compare, selected: 0, files: vec![], fields: vec![], status: Status::Idle };
         s.select(0, cx);
         s
     }
@@ -32,6 +38,7 @@ impl PdfPage {
     fn tool(&self) -> &'static ToolSpec { &TOOLS[self.selected] }
 
     fn select(&mut self, idx: usize, cx: &mut Context<Self>) {
+        self.special = None;
         self.selected = idx;
         let tool = self.tool();
         self.files.retain(|f| accepts_file(tool, &formats::extension_of(f)));
@@ -92,10 +99,16 @@ impl gpui::Render for PdfPage {
         let tool = self.tool();
         let list = div().id("pdf-tools").flex().flex_col().gap_1().w(px(210.)).h_full().p_3().border_r_1().border_color(BORDER).overflow_y_scroll()
             .children(TOOLS.iter().enumerate().map(|(i, t)| {
-                let on = i == self.selected;
+                let on = self.special.is_none() && i == self.selected;
                 div().id(SharedString::from(format!("tool-{}", t.op))).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(t.name)
                     .when(on, |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI))
                     .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
+            }))
+            .child(div().h(px(1.)).my_2().bg(BORDER))
+            .children([(Special::Form, "Fill form"), (Special::Compare, "Compare")].into_iter().map(|(sp, name)| {
+                div().id(SharedString::from(format!("special-{name}"))).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(name)
+                    .when(self.special == Some(sp), |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI))
+                    .on_click(cx.listener(move |this, _, _, cx| { this.special = Some(sp); cx.notify(); }))
             }));
 
         let drop_zone = div().id("pdf-drop").flex().items_center().justify_between().gap_3().p_4().rounded_lg().border_2().border_color(BORDER).bg(SURFACE)
@@ -142,7 +155,7 @@ impl gpui::Render for PdfPage {
             }
         };
 
-        let panel = div().id("pdf-panel").flex().flex_col().gap_3().p_5().flex_1().h_full().overflow_y_scroll()
+        let panel = div().id("pdf-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(px(0.)).h_full().overflow_y_scroll()
             .child(div().text_xl().font_weight(FontWeight::BOLD).child(tool.name))
             .child(div().text_sm().text_color(MUTED).child(tool.desc))
             .child(drop_zone)
@@ -151,6 +164,11 @@ impl gpui::Render for PdfPage {
             .child(div().flex().child(button("pdf-run", if tool.min_files > 1 && n < tool.min_files { format!("Add at least {} files", tool.min_files) } else { "Run".to_string() }, true)
                 .when(!ready, |b| b.opacity(0.45)).on_click(cx.listener(move |this, _, _, cx| { if ready { this.run(cx); } }))))
             .child(status);
-        div().flex().size_full().child(list).child(panel)
+        let right = match self.special {
+            Some(Special::Form) => self.form.clone().into_any_element(),
+            Some(Special::Compare) => self.compare.clone().into_any_element(),
+            None => panel.into_any_element(),
+        };
+        div().flex().size_full().child(list).child(right)
     }
 }
