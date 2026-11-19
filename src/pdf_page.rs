@@ -12,13 +12,13 @@ pub enum PdfEvent { Install(&'static str) }
 
 /// The list on the left has the form-driven tools, then two special ones with their own panels.
 #[derive(Clone, Copy, PartialEq)]
-enum Special { Form, Compare }
+enum Special { Form, Compare, Editor }
 
 enum Field { Text(Entity<TextField>), Choice(String) }
 
 enum Status { Idle, Running, Done(Vec<PathBuf>), Failed(String, Option<String>) }
 
-pub struct PdfPage { special: Option<Special>, form: Entity<crate::pdf_extra::FormPanel>, compare: Entity<crate::pdf_extra::ComparePanel>, selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
+pub struct PdfPage { special: Option<Special>, form: Entity<crate::pdf_extra::FormPanel>, compare: Entity<crate::pdf_extra::ComparePanel>, editor: Entity<crate::page_editor::PageEditor>, selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
 
 impl EventEmitter<PdfEvent> for PdfPage {}
 
@@ -30,7 +30,8 @@ impl PdfPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let form = cx.new(|_| crate::pdf_extra::FormPanel::new());
         let compare = cx.new(|_| crate::pdf_extra::ComparePanel::new());
-        let mut s = Self { special: None, form, compare, selected: 0, files: vec![], fields: vec![], status: Status::Idle };
+        let editor = cx.new(crate::page_editor::PageEditor::new);
+        let mut s = Self { special: None, form, compare, editor, selected: 0, files: vec![], fields: vec![], status: Status::Idle };
         s.select(0, cx);
         s
     }
@@ -105,7 +106,7 @@ impl gpui::Render for PdfPage {
                     .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
             }))
             .child(div().h(px(1.)).my_2().bg(BORDER))
-            .children([(Special::Form, "Fill form"), (Special::Compare, "Compare")].into_iter().map(|(sp, name)| {
+            .children([(Special::Editor, "Edit, sign & redact"), (Special::Form, "Fill form"), (Special::Compare, "Compare")].into_iter().map(|(sp, name)| {
                 div().id(SharedString::from(format!("special-{name}"))).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(name)
                     .when(self.special == Some(sp), |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI))
                     .on_click(cx.listener(move |this, _, _, cx| { this.special = Some(sp); cx.notify(); }))
@@ -167,6 +168,7 @@ impl gpui::Render for PdfPage {
         let right = match self.special {
             Some(Special::Form) => self.form.clone().into_any_element(),
             Some(Special::Compare) => self.compare.clone().into_any_element(),
+            Some(Special::Editor) => self.editor.clone().into_any_element(),
             None => panel.into_any_element(),
         };
         div().flex().size_full().child(list).child(right)

@@ -134,7 +134,7 @@ impl gpui::Render for TextField {
                 let clip = || cx.read_from_clipboard().and_then(|c| c.text());
                 if apply_key(&mut this.value, &ks.key, ctrl, clip) { this.marked = None; cx.notify(); }
             }))
-            .child(div().absolute().size_full().child(catcher))
+            .child(div().absolute().top(px(0.)).left(px(0.)).size_full().child(catcher))
             .child(if self.value.is_empty() && !focused { div().text_color(MUTED).child(self.placeholder.clone()) }
                    else { div().text_color(TEXT).child(format!("{shown}{}", if focused { "▏" } else { "" })) })
     }

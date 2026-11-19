@@ -21,10 +21,12 @@ stderr); use the drop zone or `converter-desktop <files>`. Windows/macOS are not
 ## PDF tools
 15 tools as forms (drop or browse for files, fill the fields, Run): merge, split, extract / remove / reorder pages,
 rotate, crop, compress, add / remove password, repair, watermark, page numbers, images to PDF, OCR. Missing engines
-(qpdf for passwords, Python packages for OCR) show an **Install** button in the result. Sign, edit, redact, form
+(qpdf for passwords, Python packages for OCR) show an **Install** button in the result. Form
 filling and compare are separate panels: **Fill form** lists the PDF's own fields as inputs and saves a filled
 copy (optionally flattened); **Compare** shows which text lines were removed/added between two PDFs (needs Python +
-PyMuPDF). Sign, edit and redact need a page canvas and are still to come (the core implements them).
+PyMuPDF). **Edit, sign & redact** shows the page (rendered with poppler) and turns clicks/drags into annotations: text,
+rectangles, ellipses, lines, typed signatures (Dancing Script) and redactions that delete the text under them.
+Save runs redact, then edit, then sign. Limits: pages are drawn unrotated, freehand and image stamps are not in the UI yet.
 
 ## Settings
 Output folder (or next to the original), keep-both vs replace when a result exists, the ring on/off, and start

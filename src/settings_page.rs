@@ -42,7 +42,9 @@ fn section(title: &'static str, body: impl IntoElement) -> impl IntoElement {
 
 impl gpui::Render for SettingsPage {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let s = settings::get();
+        let mut s = settings::get();
+        // Show what is really on disk: the entry may have been removed outside the app.
+        if autostart::SUPPORTED { s.autostart = autostart::is_enabled(); }
         let folder_text: SharedString = match &s.output_dir { Some(d) => d.display().to_string().into(), None => "Next to the original file".into() };
         let toggle = |id: &'static str, on: bool, cx: &mut Context<Self>, f: fn(&mut Self, bool, &mut Context<Self>)| {
             div().flex().gap_1()

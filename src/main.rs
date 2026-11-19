@@ -1,6 +1,8 @@
 //! Converter desktop app (gpui). Screens: Convert (drop files, pick a target) and Engines.
+mod editor_model;
 mod gesture;
 mod jobs;
+mod page_editor;
 mod pdf_extra;
 mod pdf_page;
 mod pdf_tools;
