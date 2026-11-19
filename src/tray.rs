@@ -103,8 +103,10 @@ mod other {
         let tx_menu = tx.clone();
         std::thread::Builder::new().name("tray-menu".into()).spawn(move || {
             for ev in MenuEvent::receiver() {
+                // Menu items are not Send, so the thread never touches them; the settings flag is the source of truth and
+                // the main thread re-syncs the checkmark (see `pump`).
                 let msg = if ev.id == open_id { AppEvent::OpenMain } else if ev.id == quit_id { AppEvent::Quit }
-                    else if ev.id == ring_id { AppEvent::SetRing(ring_item.is_checked()) } else { continue };
+                    else if ev.id == ring_id { AppEvent::SetRing(!crate::settings::RING_ENABLED.load(std::sync::atomic::Ordering::Relaxed)) } else { continue };
                 if tx_menu.send(msg).is_err() { break; }
             }
         }).map_err(|e| e.to_string())?;
