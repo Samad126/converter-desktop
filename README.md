@@ -19,7 +19,7 @@ and pass on each). **Only Linux/X11 has been run by hand**; the rest is compile-
 | Quick-convert ring (Ctrl+drag) | tested | not implemented | not implemented |
 | Tray icon, run-in-background | tested (Cinnamon) | not implemented | not implemented |
 | Start with the computer | tested | not implemented | not implemented |
-| Engine downloads | pandoc, qpdf, 7zip, yt-dlp, ffmpeg | pandoc, qpdf, yt-dlp, ffmpeg, **LibreOffice** | pandoc, qpdf, 7zip, yt-dlp, **LibreOffice** |
+| Engine downloads | pandoc, qpdf, 7zip, yt-dlp, ffmpeg, **Calibre** | pandoc, qpdf, yt-dlp, ffmpeg, LibreOffice, **Calibre** | pandoc, qpdf, 7zip, yt-dlp, LibreOffice, **Calibre** |
 
 Without a tray, closing the window quits the app. Release packages (binary + the Python scripts it looks for next
 to itself) are built by the *Release build* workflow: run it manually for downloadable artifacts, or push a `v*` tag
