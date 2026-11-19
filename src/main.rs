@@ -187,7 +187,7 @@ impl Render for Converter {
                 .hover(|s| s.bg(SURFACE_HI))
                 .on_click(cx.listener(move |t, _, _, cx| { t.page = page; if page == Page::Engines { t.refresh_engines(true); } cx.notify(); }))
         };
-        div().flex().size_full().bg(BG).text_color(TEXT)
+        div().flex().size_full().bg(BG).text_color(TEXT).font_family(FONT)
             .child(div().flex().flex_col().gap_1().w(px(170.)).p_3().bg(SURFACE).border_r_1().border_color(BORDER)
                 .child(div().px_3().py_2().text_lg().font_weight(FontWeight::BOLD).child("Converter"))
                 .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Pdf, "PDF tools", cx)).child(nav(Page::Engines, "Engines", cx)).child(div().flex_1()).child(nav(Page::Settings, "Settings", cx)))
@@ -234,7 +234,7 @@ impl Converter {
                 .child(body)
         }).collect::<Vec<_>>();
         div().id("convert-page").flex().flex_col().gap_3().p_5().size_full().overflow_y_scroll().child(drop_zone)
-            .child(div().text_sm().text_color(MUTED).child("Pick a format for each file. The result is saved next to the original."))
+            .child(div().text_sm().text_color(MUTED).child(match settings::get().output_dir { Some(d) => format!("Pick a format for each file. Results are saved in {}.", d.display()), None => "Pick a format for each file. The result is saved next to the original.".to_string() }))
             .children(rows)
     }
 
@@ -307,6 +307,7 @@ fn main() {
     let background = std::env::args().skip(1).any(|a| a == "--background");
     let files: Vec<PathBuf> = std::env::args_os().skip(1).filter(|a| a != "--background").map(PathBuf::from).collect();
     Application::new().run(move |cx: &mut App| {
+        if let Err(e) = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(theme::FONT_REGULAR), std::borrow::Cow::Borrowed(theme::FONT_BOLD)]) { eprintln!("could not load the bundled font: {e}"); }
         let tray_ok = start_background(cx);
         if tray_ok { open_keepalive(cx); }
         // With a tray the app lives on after the last window closes; without one it would be invisible, so quit.

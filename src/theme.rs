@@ -16,3 +16,8 @@ pub const ACCENT_HI: Rgba = hex(0x5eead4);
 pub const ON_ACCENT: Rgba = hex(0x06201d);
 pub const OK: Rgba = hex(0x4ade80);
 pub const ERR: Rgba = hex(0xf87171);
+
+/// The UI font, bundled with the app so text looks (and bolds) the same on every platform.
+pub const FONT: &str = "Noto Sans";
+pub const FONT_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+pub const FONT_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSans-Bold.ttf");

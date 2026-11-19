@@ -174,7 +174,7 @@ fn pos_in_window(p: Point<Pixels>) -> (f32, f32) { (f32::from(p.x), f32::from(p.
 
 impl Render for Ring {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = div().id("ring").relative().size(px(WIN))
+        let root = div().id("ring").relative().size(px(WIN)).font_family(FONT)
             .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
                 this.learn_paths(ev.drag(cx).paths());
                 let hover = hit(&this.centers(), CHIP_W, CHIP_H, pos_in_window(ev.event.position));
