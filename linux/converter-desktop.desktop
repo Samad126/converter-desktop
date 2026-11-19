@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Converter
+GenericName=File converter
+Comment=Convert documents, images, audio, video, PDFs and more
+Exec=@EXEC@ %F
+Terminal=false
+Categories=Utility;
+MimeType=application/pdf;image/png;image/jpeg;
+StartupNotify=false

@@ -14,7 +14,7 @@ jobs:
         include:
           - { os: ubuntu-22.04,   name: converter-desktop-linux-x86_64,  bin: target/release/converter-desktop,     kind: tar.gz }
           - { os: windows-latest, name: converter-desktop-windows-x86_64, bin: target/release/converter-desktop.exe, kind: zip }
-          - { os: macos-latest,   name: converter-desktop-macos-arm64,   bin: target/release/converter-desktop,     kind: tar.gz }
+          - { os: macos-latest,   name: converter-desktop-macos-arm64,   bin: target/release/converter-desktop,     kind: app }
     steps:
       - uses: actions/checkout@v4
         with: { path: desktop }
