@@ -1,0 +1,16 @@
+[package]
+name = "converter-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+# Sibling checkout for now: clone converter-core next to this repo. Switch to a git dependency once core is tagged.
+converter-core = { path = "../core" }
+gpui = "0.2.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+# gpui 0.2.2 pulls `xattr 0.2.3`, which no longer compiles on Linux against recent `libc`
+# (ENOATTR was removed there). The vendored copy maps it to ENODATA; nothing else changed.
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
