@@ -1,10 +1,13 @@
 //! Converter desktop app (gpui). Screens: Convert (drop files, pick a target) and Engines.
 mod gesture;
 mod jobs;
+mod pdf_page;
+mod pdf_tools;
 mod ring;
 mod runtime;
 mod theme;
 mod tray;
+mod widgets;
 
 use converter_core::{
     engines::{self, manager},
@@ -52,7 +55,7 @@ fn open_main(cx: &mut App, files: Vec<PathBuf>) {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions { title: Some("Converter".into()), ..Default::default() }),
         ..Default::default()
-    }, move |_, cx| cx.new(|_| { let mut c = Converter::new(); c.add_files(&files); c }));
+    }, move |_, cx| cx.new(|cx| { let mut c = Converter::new(cx); c.add_files(&files); c }));
     if let Ok(h) = opened { cx.set_global(MainWindow(Some(h.into()))); cx.activate(true); }
 }
 
@@ -62,18 +65,22 @@ enum Status { Idle, Running(Option<f32>), Done(PathBuf), Failed(String, Option<S
 struct Job { path: PathBuf, ext: String, status: Status }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Page { Convert, Engines }
+enum Page { Convert, Pdf, Engines }
 
 struct EngineRow { name: &'static str, used_for: &'static str, state: EngineState }
 
 #[derive(Clone, PartialEq)]
 enum EngineState { Installed(String), Available(String, u64), Missing(&'static str), Installing(f32, &'static str), Failed(String) }
 
-struct Converter { page: Page, jobs: Vec<Job>, engines: Vec<EngineRow>, cfg: Arc<Config> }
+struct Converter { page: Page, jobs: Vec<Job>, engines: Vec<EngineRow>, cfg: Arc<Config>, pdf: gpui::Entity<pdf_page::PdfPage> }
 
 impl Converter {
-    fn new() -> Self {
-        let mut s = Self { page: Page::Convert, jobs: vec![], engines: vec![], cfg: Arc::new(Config::default()) };
+    fn new(cx: &mut Context<Self>) -> Self {
+        let cfg = Arc::new(Config::default());
+        let pdf = cx.new(|cx| pdf_page::PdfPage::new(cfg.clone(), cx));
+        // "Install qpdf" in a PDF tool jumps to the Engines page and starts the download.
+        cx.subscribe(&pdf, |this, _, ev: &pdf_page::PdfEvent, cx| { let pdf_page::PdfEvent::Install(name) = ev; this.page = Page::Engines; this.install(name, cx); }).detach();
+        let mut s = Self { page: Page::Convert, jobs: vec![], engines: vec![], cfg, pdf };
         s.refresh_engines(true);
         s
     }
@@ -160,7 +167,7 @@ impl Converter {
     }
 }
 
-fn button(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, primary: bool) -> gpui::Stateful<gpui::Div> {
+pub fn button(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, primary: bool) -> gpui::Stateful<gpui::Div> {
     div().id(id).px_3().py_1().rounded_md().text_sm().cursor_pointer().child(label.into())
         .bg(if primary { ACCENT } else { SURFACE_HI }).text_color(if primary { ON_ACCENT } else { TEXT })
         .hover(move |s| s.bg(if primary { ACCENT_HI } else { BORDER }))
@@ -182,8 +189,8 @@ impl Render for Converter {
         div().flex().size_full().bg(BG).text_color(TEXT)
             .child(div().flex().flex_col().gap_1().w(px(170.)).p_3().bg(SURFACE).border_r_1().border_color(BORDER)
                 .child(div().px_3().py_2().text_lg().font_weight(FontWeight::BOLD).child("Converter"))
-                .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Engines, "Engines", cx)))
-            .child(div().flex_1().h_full().overflow_hidden().child(match self.page { Page::Convert => self.convert_page(cx).into_any_element(), Page::Engines => self.engines_page(cx).into_any_element() }))
+                .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Pdf, "PDF tools", cx)).child(nav(Page::Engines, "Engines", cx)))
+            .child(div().flex_1().h_full().overflow_hidden().child(match self.page { Page::Convert => self.convert_page(cx).into_any_element(), Page::Pdf => self.pdf.clone().into_any_element(), Page::Engines => self.engines_page(cx).into_any_element() }))
     }
 }
 

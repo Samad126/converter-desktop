@@ -38,6 +38,16 @@ pub fn spawn(cfg: Arc<Config>, path: PathBuf, target: String, progress: Progress
     })
 }
 
+/// Shows `path` in the system file manager (selects it where the platform supports that).
+pub fn reveal(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

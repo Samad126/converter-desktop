@@ -5,7 +5,7 @@ Native desktop app (Windows / Linux / macOS) for the converter, written in Rust 
 [converter-core](https://github.com/Samad126/converter-core).
 
 ## Status
-Early. Working: the Ctrl+drag quick-convert ring (below), Convert page (drop files, pick a target, progress, result saved next to the original),
+Early. Working: the Ctrl+drag quick-convert ring (below), tray, PDF tools page, Convert page (drop files, pick a target, progress, result saved next to the original),
 Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
 verification). Planned: PDF tools screens, settings, autostart, Windows/macOS builds.
 
@@ -17,6 +17,12 @@ cancels. Files that need an engine you haven't installed show dimmed, with the i
 Linux: X11 only (global input is read through XRecord). On Wayland the ring is unavailable (the app says so on
 stderr); use the drop zone or `converter-desktop <files>`. Windows/macOS are not implemented yet.
 `converter-desktop --debug-gesture` prints the gestures the listener sees.
+
+## PDF tools
+15 tools as forms (drop or browse for files, fill the fields, Run): merge, split, extract / remove / reorder pages,
+rotate, crop, compress, add / remove password, repair, watermark, page numbers, images to PDF, OCR. Missing engines
+(qpdf for passwords, Python packages for OCR) show an **Install** button in the result. Sign, edit, redact, form
+filling and compare need a page canvas and are still to come (the core already implements them).
 
 ## System tray
 The app lives in the tray (Linux: StatusNotifierItem over D-Bus, so it needs a tray host: KDE, Cinnamon, XFCE,
