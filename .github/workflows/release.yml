@@ -1,0 +1,48 @@
+name: Release build
+on:
+  push: { tags: ["v*"] }
+  workflow_dispatch:          # manual run: builds the packages and uploads them as artifacts, publishes nothing
+permissions:
+  contents: write
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,   name: converter-desktop-linux-x86_64,  bin: target/release/converter-desktop,     kind: tar.gz }
+          - { os: windows-latest, name: converter-desktop-windows-x86_64, bin: target/release/converter-desktop.exe, kind: zip }
+          - { os: macos-latest,   name: converter-desktop-macos-arm64,   bin: target/release/converter-desktop,     kind: tar.gz }
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: desktop }
+      - uses: actions/checkout@v4
+        with: { repository: Samad126/converter-core, path: core }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop }
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig-dev \
+            libfreetype-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-shape0-dev libasound2-dev
+      - run: cargo build --release
+        working-directory: desktop
+      - name: Package
+        shell: bash
+        working-directory: desktop
+        run: ./packaging.sh "${{ matrix.bin }}" "${{ matrix.name }}" "${{ matrix.kind }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: desktop/dist/${{ matrix.name }}.*
+          if-no-files-found: error
+      - name: Attach to the GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/dist/${{ matrix.name }}.*
+          prerelease: true

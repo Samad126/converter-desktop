@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI apps: without this a console window opens behind the app.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Converter desktop app (gpui). Screens: Convert (drop files, pick a target) and Engines.
 mod editor_model;
 mod gesture;
