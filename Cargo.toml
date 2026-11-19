@@ -18,3 +18,6 @@ xattr = { path = "vendor/xattr" }
 [target.'cfg(target_os = "linux")'.dependencies]
 # XRecord = read global pointer/keyboard events without a window (pure Rust, no extra system libraries).
 x11rb = { version = "0.13", default-features = false, features = ["record"] }
+# System tray via the StatusNotifierItem D-Bus protocol (pure Rust; works on KDE, GNOME with the AppIndicator
+# extension, Cinnamon, XFCE, ...). Windows/macOS will use `tray-icon` instead.
+ksni = "0.3"

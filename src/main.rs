@@ -4,6 +4,7 @@ mod jobs;
 mod ring;
 mod runtime;
 mod theme;
+mod tray;
 
 use converter_core::{
     engines::{self, manager},
@@ -18,6 +19,42 @@ use gpui::{
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use theme::*;
+
+/// Everything that can ask the running app to do something: the global gesture and the tray menu.
+pub enum AppEvent { Gesture(gesture::Gesture), OpenMain, SetRing(bool), Quit }
+
+static RING_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+struct MainWindow(Option<gpui::AnyWindowHandle>);
+impl gpui::Global for MainWindow {}
+
+/// gpui's X11 backend ends the app when the last window closes. A 1×1 window that is never shown keeps it alive
+/// while the tray is the user's way back in.
+struct KeepAlive;
+impl Render for KeepAlive { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
+
+fn open_keepalive(cx: &mut App) {
+    let bounds = Bounds { origin: gpui::point(px(-200.), px(-200.)), size: gpui::size(px(1.), px(1.)) };
+    let _ = cx.open_window(WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)), titlebar: None, focus: false, show: false, is_movable: false, is_resizable: false,
+        kind: gpui::WindowKind::PopUp, window_background: gpui::WindowBackgroundAppearance::Transparent, ..Default::default()
+    }, |_, cx| cx.new(|_| KeepAlive));
+}
+
+/// Shows the main window: raises it if it is already open, otherwise creates it.
+fn open_main(cx: &mut App, files: Vec<PathBuf>) {
+    if let Some(h) = cx.try_global::<MainWindow>().and_then(|m| m.0) {
+        // gpui can keep listing a window the user already closed; only trust it if raising it actually works.
+        if cx.windows().contains(&h) && h.update(cx, |_, window, _| window.activate_window()).is_ok() { return; }
+    }
+    let bounds = Bounds::centered(None, gpui::size(px(980.), px(660.)), cx);
+    let opened = cx.open_window(WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions { title: Some("Converter".into()), ..Default::default() }),
+        ..Default::default()
+    }, move |_, cx| cx.new(|_| { let mut c = Converter::new(); c.add_files(&files); c }));
+    if let Ok(h) = opened { cx.set_global(MainWindow(Some(h.into()))); cx.activate(true); }
+}
 
 #[derive(Clone, PartialEq)]
 enum Status { Idle, Running(Option<f32>), Done(PathBuf), Failed(String, Option<String>) }
@@ -215,31 +252,40 @@ impl Converter {
     }
 }
 
-/// Runs the global Ctrl+drag listener and turns its events into ring windows.
-fn start_ring_gesture(cx: &mut App) {
-    let (tx, rx) = std::sync::mpsc::channel::<gesture::Gesture>();
-    if let Err(e) = gesture::listen(move |g| { let _ = tx.send(g); }) { eprintln!("quick-convert ring disabled: {e}"); return; }
+/// Starts the tray and the global gesture listener, and applies their events on the UI thread.
+fn start_background(cx: &mut App) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
+    let tray_ok = match tray::start(tx.clone(), true) { Ok(()) => true, Err(e) => { eprintln!("no tray icon ({e}); closing the window will quit"); false } };
+    let tx2 = tx.clone();
+    if let Err(e) = gesture::listen(move |g| { let _ = tx2.send(AppEvent::Gesture(g)); }) { eprintln!("quick-convert ring disabled: {e}"); }
     let cfg = Arc::new(Config::default());
     cx.spawn(async move |cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(20)).await;
-        while let Ok(g) = rx.try_recv() {
+        while let Ok(ev) = rx.try_recv() {
             let cfg = cfg.clone();
-            let _ = cx.update(|cx| match g {
-                gesture::Gesture::Open { x, y } => ring::open(x, y, cfg, cx),
-                gesture::Gesture::Page(d) => { if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) { let _ = h.update(cx, |r, _, cx| r.flip(d, cx)); } }
-                gesture::Gesture::Cancel => ring::close(cx),
-                gesture::Gesture::Released => {
-                    // The drop (if any) is being delivered right now; give it a moment before closing an unused ring.
-                    if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) {
-                        cx.spawn(async move |cx| {
-                            cx.background_executor().timer(std::time::Duration::from_millis(700)).await;
-                            let _ = cx.update(|cx| { if h.update(cx, |r, _, _| r.is_idle()).unwrap_or(false) { ring::close(cx); } });
-                        }).detach();
+            let _ = cx.update(|cx| match ev {
+                AppEvent::OpenMain => open_main(cx, vec![]),
+                AppEvent::Quit => cx.quit(),
+                AppEvent::SetRing(on) => { RING_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed); if !on { ring::close(cx); } }
+                AppEvent::Gesture(_) if !RING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) => {}
+                AppEvent::Gesture(g) => match g {
+                    gesture::Gesture::Open { x, y } => ring::open(x, y, cfg, cx),
+                    gesture::Gesture::Page(d) => { if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) { let _ = h.update(cx, |r, _, cx| r.flip(d, cx)); } }
+                    gesture::Gesture::Cancel => ring::close(cx),
+                    gesture::Gesture::Released => {
+                        // The drop (if any) is being delivered right now; give it a moment before closing an unused ring.
+                        if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) {
+                            cx.spawn(async move |cx| {
+                                cx.background_executor().timer(std::time::Duration::from_millis(700)).await;
+                                let _ = cx.update(|cx| { if h.update(cx, |r, _, _| r.is_idle()).unwrap_or(false) { ring::close(cx); } });
+                            }).detach();
+                        }
                     }
-                }
+                },
             });
         }
     }).detach();
+    tray_ok
 }
 
 fn main() {
@@ -247,14 +293,14 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--debug-gesture") {
         match gesture::listen(|g| println!("{g:?}")) { Ok(()) => loop { std::thread::sleep(std::time::Duration::from_secs(3600)) }, Err(e) => { eprintln!("{e}"); std::process::exit(1) } }
     }
-    Application::new().run(|cx: &mut App| {
-        start_ring_gesture(cx);
-        let bounds = Bounds::centered(None, gpui::size(px(980.), px(660.)), cx);
-        cx.open_window(WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions { title: Some("Converter".into()), ..Default::default() }),
-            ..Default::default()
-        }, |_, cx| cx.new(|_| { let mut c = Converter::new(); c.add_files(&std::env::args_os().skip(1).map(PathBuf::from).collect::<Vec<_>>()); c })).expect("could not open the window");
-        cx.activate(true);
+    // `--background`: start hidden in the tray (for autostart). Ignored when there is no tray, so the app is never invisible.
+    let background = std::env::args().skip(1).any(|a| a == "--background");
+    let files: Vec<PathBuf> = std::env::args_os().skip(1).filter(|a| a != "--background").map(PathBuf::from).collect();
+    Application::new().run(move |cx: &mut App| {
+        let tray_ok = start_background(cx);
+        if tray_ok { open_keepalive(cx); }
+        // With a tray the app lives on after the last window closes; without one it would be invisible, so quit.
+        cx.on_window_closed(move |cx| { if !tray_ok && cx.windows().is_empty() { cx.quit(); } }).detach();
+        if !(background && tray_ok) { open_main(cx, files); }
     });
 }

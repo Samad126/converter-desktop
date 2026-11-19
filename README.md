@@ -7,7 +7,7 @@ Native desktop app (Windows / Linux / macOS) for the converter, written in Rust 
 ## Status
 Early. Working: the Ctrl+drag quick-convert ring (below), Convert page (drop files, pick a target, progress, result saved next to the original),
 Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
-verification). Planned: PDF tools screens, settings, system tray, and the Ctrl+drag quick-convert ring.
+verification). Planned: PDF tools screens, settings, autostart, Windows/macOS builds.
 
 ## Quick-convert ring
 Hold **Ctrl**, drag files out of a file manager, and a ring of format chips opens under the cursor. Drop on a
@@ -17,6 +17,12 @@ cancels. Files that need an engine you haven't installed show dimmed, with the i
 Linux: X11 only (global input is read through XRecord). On Wayland the ring is unavailable (the app says so on
 stderr); use the drop zone or `converter-desktop <files>`. Windows/macOS are not implemented yet.
 `converter-desktop --debug-gesture` prints the gestures the listener sees.
+
+## System tray
+The app lives in the tray (Linux: StatusNotifierItem over D-Bus, so it needs a tray host: KDE, Cinnamon, XFCE,
+GNOME with the AppIndicator extension). Left-click opens the window; the menu has *Open Converter*, a
+*Quick-convert ring* toggle and *Quit*. Closing the window keeps the app (and the ring) running. Without a tray
+host the app says so and quits when its window closes. `converter-desktop --background` starts hidden in the tray.
 
 ## Build
 Clone this repo **next to** `converter-core` (the dependency is a sibling path for now):
