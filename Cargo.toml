@@ -9,6 +9,9 @@ license = "MIT"
 converter-core = { path = "../core" }
 gpui = "0.2.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
 
 # gpui 0.2.2 pulls `xattr 0.2.3`, which no longer compiles on Linux against recent `libc`
 # (ENOATTR was removed there). The vendored copy maps it to ENODATA; nothing else changed.

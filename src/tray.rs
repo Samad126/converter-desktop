@@ -27,6 +27,13 @@ mod imp {
 
     struct ConverterTray { tx: Sender<AppEvent>, ring: bool }
 
+    static HANDLE: std::sync::OnceLock<ksni::Handle<ConverterTray>> = std::sync::OnceLock::new();
+
+    /// Keeps the menu checkmark in step when the setting is changed elsewhere (the Settings page).
+    pub fn set_ring(on: bool) {
+        if let Some(h) = HANDLE.get().cloned() { crate::runtime::get().spawn(async move { h.update(|t| t.ring = on).await; }); }
+    }
+
     impl Tray for ConverterTray {
         fn id(&self) -> String { "converter-desktop".into() }
         fn title(&self) -> String { "Converter".into() }
@@ -52,7 +59,7 @@ mod imp {
         let tray = ConverterTray { tx, ring };
         let spawned = crate::runtime::get().block_on(async { tokio::time::timeout(std::time::Duration::from_secs(4), tray.spawn()).await });
         match spawned {
-            Ok(Ok(handle)) => { std::mem::forget(handle); Ok(()) } // dropping the handle would remove the icon; it lives as long as the process
+            Ok(Ok(handle)) => { let _ = HANDLE.set(handle); Ok(()) } // the static keeps the icon alive for the whole process
             Ok(Err(e)) => Err(format!("{e}")),
             Err(_) => Err("timed out talking to the tray host".into()),
         }
@@ -60,7 +67,10 @@ mod imp {
 }
 
 #[cfg(target_os = "linux")]
-pub use imp::start;
+pub use imp::{set_ring, start};
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_ring(_on: bool) {}
 
 #[cfg(not(target_os = "linux"))]
 pub fn start(_tx: Sender<AppEvent>, _ring: bool) -> Result<(), String> { Err("the tray is not implemented on this platform yet".into()) }

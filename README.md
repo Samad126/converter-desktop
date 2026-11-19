@@ -24,6 +24,11 @@ rotate, crop, compress, add / remove password, repair, watermark, page numbers, 
 (qpdf for passwords, Python packages for OCR) show an **Install** button in the result. Sign, edit, redact, form
 filling and compare need a page canvas and are still to come (the core already implements them).
 
+## Settings
+Output folder (or next to the original), keep-both vs replace when a result exists, the ring on/off, and start
+with the computer (Linux: an XDG autostart entry that launches `--background`). Saved to `settings.json` in the
+config folder (`CONVERTER_CONFIG_DIR` overrides it) and applied immediately.
+
 ## System tray
 The app lives in the tray (Linux: StatusNotifierItem over D-Bus, so it needs a tray host: KDE, Cinnamon, XFCE,
 GNOME with the AppIndicator extension). Left-click opens the window; the menu has *Open Converter*, a

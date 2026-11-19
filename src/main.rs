@@ -4,7 +4,10 @@ mod jobs;
 mod pdf_page;
 mod pdf_tools;
 mod ring;
+mod autostart;
 mod runtime;
+mod settings;
+mod settings_page;
 mod theme;
 mod tray;
 mod widgets;
@@ -25,8 +28,6 @@ use theme::*;
 
 /// Everything that can ask the running app to do something: the global gesture and the tray menu.
 pub enum AppEvent { Gesture(gesture::Gesture), OpenMain, SetRing(bool), Quit }
-
-static RING_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 struct MainWindow(Option<gpui::AnyWindowHandle>);
 impl gpui::Global for MainWindow {}
@@ -65,22 +66,23 @@ enum Status { Idle, Running(Option<f32>), Done(PathBuf), Failed(String, Option<S
 struct Job { path: PathBuf, ext: String, status: Status }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Page { Convert, Pdf, Engines }
+enum Page { Convert, Pdf, Engines, Settings }
 
 struct EngineRow { name: &'static str, used_for: &'static str, state: EngineState }
 
 #[derive(Clone, PartialEq)]
 enum EngineState { Installed(String), Available(String, u64), Missing(&'static str), Installing(f32, &'static str), Failed(String) }
 
-struct Converter { page: Page, jobs: Vec<Job>, engines: Vec<EngineRow>, cfg: Arc<Config>, pdf: gpui::Entity<pdf_page::PdfPage> }
+struct Converter { page: Page, jobs: Vec<Job>, engines: Vec<EngineRow>, cfg: Arc<Config>, pdf: gpui::Entity<pdf_page::PdfPage>, settings: gpui::Entity<settings_page::SettingsPage> }
 
 impl Converter {
     fn new(cx: &mut Context<Self>) -> Self {
         let cfg = Arc::new(Config::default());
-        let pdf = cx.new(|cx| pdf_page::PdfPage::new(cfg.clone(), cx));
+        let pdf = cx.new(pdf_page::PdfPage::new);
         // "Install qpdf" in a PDF tool jumps to the Engines page and starts the download.
         cx.subscribe(&pdf, |this, _, ev: &pdf_page::PdfEvent, cx| { let pdf_page::PdfEvent::Install(name) = ev; this.page = Page::Engines; this.install(name, cx); }).detach();
-        let mut s = Self { page: Page::Convert, jobs: vec![], engines: vec![], cfg, pdf };
+        let settings = cx.new(|_| settings_page::SettingsPage::new());
+        let mut s = Self { page: Page::Convert, jobs: vec![], engines: vec![], cfg, pdf, settings };
         s.refresh_engines(true);
         s
     }
@@ -117,11 +119,10 @@ impl Converter {
         }
         self.jobs[idx].status = Status::Running(None);
         cx.notify();
-        let cfg = self.cfg.clone();
         let frac = Arc::new(Mutex::new(None::<f32>));
         let f2 = frac.clone();
         let progress: ProgressFn = Arc::new(move |p| if let Progress::Fraction(f) = p { *f2.lock().unwrap() = Some(f); });
-        let handle = jobs::spawn(cfg, path, target, progress);
+        let handle = jobs::spawn(path, target, progress);
         // Poll the shared fraction while the job runs, then deliver the result.
         cx.spawn(async move |this, cx| {
             while !handle.is_finished() {
@@ -189,8 +190,8 @@ impl Render for Converter {
         div().flex().size_full().bg(BG).text_color(TEXT)
             .child(div().flex().flex_col().gap_1().w(px(170.)).p_3().bg(SURFACE).border_r_1().border_color(BORDER)
                 .child(div().px_3().py_2().text_lg().font_weight(FontWeight::BOLD).child("Converter"))
-                .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Pdf, "PDF tools", cx)).child(nav(Page::Engines, "Engines", cx)))
-            .child(div().flex_1().h_full().overflow_hidden().child(match self.page { Page::Convert => self.convert_page(cx).into_any_element(), Page::Pdf => self.pdf.clone().into_any_element(), Page::Engines => self.engines_page(cx).into_any_element() }))
+                .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Pdf, "PDF tools", cx)).child(nav(Page::Engines, "Engines", cx)).child(div().flex_1()).child(nav(Page::Settings, "Settings", cx)))
+            .child(div().flex_1().h_full().overflow_hidden().child(match self.page { Page::Convert => self.convert_page(cx).into_any_element(), Page::Pdf => self.pdf.clone().into_any_element(), Page::Settings => self.settings.clone().into_any_element(), Page::Engines => self.engines_page(cx).into_any_element() }))
     }
 }
 
@@ -262,7 +263,9 @@ impl Converter {
 /// Starts the tray and the global gesture listener, and applies their events on the UI thread.
 fn start_background(cx: &mut App) -> bool {
     let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
-    let tray_ok = match tray::start(tx.clone(), true) { Ok(()) => true, Err(e) => { eprintln!("no tray icon ({e}); closing the window will quit"); false } };
+    let ring_on = settings::get().ring;
+    settings::RING_ENABLED.store(ring_on, std::sync::atomic::Ordering::Relaxed);
+    let tray_ok = match tray::start(tx.clone(), ring_on) { Ok(()) => true, Err(e) => { eprintln!("no tray icon ({e}); closing the window will quit"); false } };
     let tx2 = tx.clone();
     if let Err(e) = gesture::listen(move |g| { let _ = tx2.send(AppEvent::Gesture(g)); }) { eprintln!("quick-convert ring disabled: {e}"); }
     let cfg = Arc::new(Config::default());
@@ -273,8 +276,8 @@ fn start_background(cx: &mut App) -> bool {
             let _ = cx.update(|cx| match ev {
                 AppEvent::OpenMain => open_main(cx, vec![]),
                 AppEvent::Quit => cx.quit(),
-                AppEvent::SetRing(on) => { RING_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed); if !on { ring::close(cx); } }
-                AppEvent::Gesture(_) if !RING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) => {}
+                AppEvent::SetRing(on) => { settings::RING_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed); settings::update(|s| s.ring = on); if !on { ring::close(cx); } }
+                AppEvent::Gesture(_) if !settings::RING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) => {}
                 AppEvent::Gesture(g) => match g {
                     gesture::Gesture::Open { x, y } => ring::open(x, y, cfg, cx),
                     gesture::Gesture::Page(d) => { if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) { let _ = h.update(cx, |r, _, cx| r.flip(d, cx)); } }

@@ -1218,8 +1218,11 @@ name = "converter-desktop"
 version = "0.1.0"
 dependencies = [
  "converter-core",
+ "dirs 6.0.0",
  "gpui",
  "ksni",
+ "serde",
+ "serde_json",
  "tokio",
  "x11rb",
 ]

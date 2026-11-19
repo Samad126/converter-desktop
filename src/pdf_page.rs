@@ -3,11 +3,10 @@ use crate::pdf_tools::{accepts_file, build_flags, Accepts, FieldKind, ToolSpec, 
 use crate::theme::*;
 use crate::widgets::TextField;
 use crate::{jobs, runtime};
-use converter_core::{formats, Config, ErrorCode};
+use converter_core::{formats, ErrorCode};
 use gpui::{div, prelude::*, px, Context, Entity, EventEmitter, ExternalPaths, FontWeight, PathPromptOptions, SharedString, Window};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 pub enum PdfEvent { Install(&'static str) }
 
@@ -15,7 +14,7 @@ enum Field { Text(Entity<TextField>), Choice(String) }
 
 enum Status { Idle, Running, Done(Vec<PathBuf>), Failed(String, Option<String>) }
 
-pub struct PdfPage { cfg: Arc<Config>, selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
+pub struct PdfPage { selected: usize, files: Vec<PathBuf>, fields: Vec<Field>, status: Status }
 
 impl EventEmitter<PdfEvent> for PdfPage {}
 
@@ -24,8 +23,8 @@ fn button(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, primar
 }
 
 impl PdfPage {
-    pub fn new(cfg: Arc<Config>, cx: &mut Context<Self>) -> Self {
-        let mut s = Self { cfg, selected: 0, files: vec![], fields: vec![], status: Status::Idle };
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let mut s = Self { selected: 0, files: vec![], fields: vec![], status: Status::Idle };
         s.select(0, cx);
         s
     }
@@ -69,10 +68,10 @@ impl PdfPage {
         let flags = match build_flags(tool, &values) { Ok(f) => f, Err(m) => { self.status = Status::Failed(m, None); cx.notify(); return; } };
         self.status = Status::Running;
         cx.notify();
-        let (cfg, files, op) = (self.cfg.clone(), self.files.clone(), tool.op);
+        let (cfg, files, op, out) = (crate::settings::config(), self.files.clone(), tool.op, crate::settings::get().output_dir);
         let handle = runtime::get().spawn(async move {
             let f = move |k: &str| flags.get(k).cloned();
-            converter_core::pdf_cli::run(&cfg, op, &files, &f, None).await
+            converter_core::pdf_cli::run(&cfg, op, &files, &f, out).await
         });
         cx.spawn(async move |this, cx| {
             let r = handle.await;

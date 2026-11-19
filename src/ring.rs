@@ -128,7 +128,7 @@ impl Ring {
         let total = paths.len();
         self.phase = Phase::Converting { done: 0, total };
         cx.notify();
-        let handles: Vec<_> = paths.into_iter().map(|p| (p.clone(), jobs::spawn(self.cfg.clone(), p, chip.id.clone(), progress::noop()))).collect();
+        let handles: Vec<_> = paths.into_iter().map(|p| (p.clone(), jobs::spawn(p, chip.id.clone(), progress::noop()))).collect();
         cx.spawn(async move |this, cx| {
             let (mut ok, mut failed) = (0usize, vec![]);
             for (i, (path, h)) in handles.into_iter().enumerate() {

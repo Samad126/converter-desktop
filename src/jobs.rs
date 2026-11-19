@@ -2,7 +2,6 @@
 use crate::runtime;
 use converter_core::{engines, formats, progress::ProgressFn, Config, ConvertOptions};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// (target id, label). Media targets carry a `media:` prefix so one string can name either matrix.
 pub fn targets_for(ext: &str) -> Vec<(String, String)> {
@@ -28,9 +27,12 @@ pub fn missing_engine(cfg: &Config, ext: &str, target: &str) -> Option<&'static 
     engines::resolve(t, cfg, None).is_none().then_some(t.name)
 }
 
-pub fn spawn(cfg: Arc<Config>, path: PathBuf, target: String, progress: ProgressFn) -> tokio::task::JoinHandle<converter_core::Result<PathBuf>> {
+/// Starts a conversion with the settings as they are right now (output folder, overwrite behaviour).
+pub fn spawn(path: PathBuf, target: String, progress: ProgressFn) -> tokio::task::JoinHandle<converter_core::Result<PathBuf>> {
+    let cfg = crate::settings::config();
+    let out_dir = crate::settings::get().output_dir;
     runtime::get().spawn(async move {
-        let opts = ConvertOptions::default();
+        let opts = ConvertOptions { out_dir, ..ConvertOptions::default() };
         match target.strip_prefix("media:") {
             Some(id) => converter_core::media::convert_media(&cfg, &path, id, opts, progress).await,
             None => converter_core::convert_file(&cfg, &path, &target, opts).await.map(|mut v| v.remove(0)),
