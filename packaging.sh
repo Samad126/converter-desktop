@@ -2,6 +2,7 @@
 # Packs a release build. usage: packaging.sh <binary> <archive-name> <tar.gz|zip|app>
 #   tar.gz  Linux: folder with the binary, scripts/, licenses, a desktop entry and a per-user install.sh
 #   zip     Windows: folder with the .exe, scripts/ and licenses
+#   (the Windows setup.exe is built from the staged zip folder by windows/installer.nsi in the release workflow)
 #   app     macOS: Converter.app (binary in Contents/MacOS, scripts in Contents/Resources), ad-hoc signed, zipped with ditto
 set -euo pipefail
 bin="$1"; name="$2"; kind="$3"
