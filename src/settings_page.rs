@@ -4,10 +4,13 @@ use crate::{autostart, button, settings};
 use gpui::{div, prelude::*, px, Context, FontWeight, PathPromptOptions, SharedString, Window};
 use std::sync::atomic::Ordering;
 
-pub struct SettingsPage { note: Option<(String, bool)> }
+#[derive(Clone, Copy, PartialEq)]
+enum Confirm { Data, App }
+
+pub struct SettingsPage { note: Option<(String, bool)>, confirm: Option<Confirm> }
 
 impl SettingsPage {
-    pub fn new() -> Self { Self { note: None } }
+    pub fn new() -> Self { Self { note: None, confirm: None } }
 
     fn say(&mut self, msg: impl Into<String>, ok: bool, cx: &mut Context<Self>) { self.note = Some((msg.into(), ok)); cx.notify(); }
 
@@ -22,6 +25,19 @@ impl SettingsPage {
         match autostart::set(on) {
             Ok(()) => { settings::update(|s| s.autostart = on); self.note = None; cx.notify(); }
             Err(e) => self.say(e, false, cx),
+        }
+    }
+
+    /// Runs the removal, shows its message, then closes the app (it would otherwise re-create its settings file).
+    fn run_removal(&mut self, what: Confirm, cx: &mut Context<Self>) {
+        self.confirm = None;
+        let result = match what { Confirm::Data => crate::uninstall::remove_all_data(), Confirm::App => crate::uninstall::uninstall_app() };
+        match result {
+            Ok(done) => {
+                self.say(done.message, true, cx);
+                if done.quit { cx.spawn(async move |_, cx| { cx.background_executor().timer(std::time::Duration::from_millis(2500)).await; std::process::exit(0); }).detach(); }
+            }
+            Err(e) => self.say(format!("Could not finish: {e}"), false, cx),
         }
     }
 
@@ -70,6 +86,18 @@ impl gpui::Render for SettingsPage {
             .child(section("Start with this computer", div().flex().flex_col().gap_2()
                 .child(div().text_sm().text_color(MUTED).child(if autostart::SUPPORTED { "Launches hidden when you sign in, so the app (and the ring, where supported) is always ready." } else { "Not available on this platform." }))
                 .when(autostart::SUPPORTED, |d| d.child(toggle("auto", s.autostart, cx, Self::set_autostart)))))
+            .child(section("Remove Converter", div().flex().flex_col().gap_2()
+                .child(div().text_sm().text_color(MUTED).child(if cfg!(windows) { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall opens the uninstaller, which asks whether to delete them too." } else { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall does that and removes the app itself. Your converted files are never touched." }))
+                .child(match self.confirm {
+                    None => div().flex().gap_1()
+                        .child(button("rm-data", "Remove all data…", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::Data); cx.notify(); })))
+                        .child(button("rm-app", "Uninstall Converter…", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::App); cx.notify(); }))),
+                    Some(what) => div().flex().flex_col().gap_2()
+                        .child(div().text_sm().text_color(ERR).child(if what == Confirm::Data { "This cannot be undone and the app will close. Continue?" } else { "The app will be removed and closed. Continue?" }))
+                        .child(div().flex().gap_1()
+                            .child(button("rm-yes", "Yes, remove", true).on_click(cx.listener(move |t, _, _, cx| t.run_removal(what, cx))))
+                            .child(button("rm-no", "Cancel", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = None; cx.notify(); })))),
+                })))
             .when_some(self.note.clone(), |d, (msg, ok)| d.child(div().text_sm().text_color(if ok { OK } else { ERR }).child(msg)))
             .child(div().h(px(8.)))
     }

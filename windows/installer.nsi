@@ -2,6 +2,9 @@
 ; Build: makensis /DVERSION=0.1.0 /DSRC=<staged folder> /DOUT=<setup.exe> windows\installer.nsi
 Unicode true
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
+!insertmacro un.GetParameters
+!insertmacro un.GetOptions
 
 Name "Converter"
 OutFile "${OUT}"
@@ -46,6 +49,23 @@ Section "Uninstall"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Converter"
   DeleteRegKey HKCU "${UNKEY}"
   DeleteRegKey HKCU "Software\Converter"
-  ; Only the files we installed; engines/settings live in the app data folder and are kept.
-  RMDir /r "$INSTDIR"
+  ; Only the files we installed, never a blanket delete of $INSTDIR (the user may have picked a shared folder).
+  Delete "$INSTDIR\converter-desktop.exe"
+  Delete "$INSTDIR\README.md"
+  Delete "$INSTDIR\NOTO-LICENSE.txt"
+  Delete "$INSTDIR\OFL-DancingScript.txt"
+  RMDir /r "$INSTDIR\scripts"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
+
+  ; Settings, downloaded engines and temp files. Ask (default: keep); "/PURGE=1" deletes them without asking, and a plain /S keeps them.
+  ${un.GetParameters} $R0
+  ${un.GetOptions} $R0 "/PURGE=" $R1
+  StrCmp $R1 "1" purge
+  IfSilent keep
+  MessageBox MB_YESNO|MB_DEFBUTTON2 "Also delete Converter's settings, downloaded engines and temporary files?" IDNO keep
+  purge:
+  RMDir /r "$APPDATA\converter"
+  RMDir /r "$LOCALAPPDATA\converter"
+  keep:
 SectionEnd

@@ -55,6 +55,14 @@ Output folder (or next to the original), keep-both vs replace when a result exis
 with the computer (Linux: an XDG autostart entry that launches `--background`). Saved to `settings.json` in the
 config folder (`CONVERTER_CONFIG_DIR` overrides it) and applied immediately.
 
+## Uninstalling
+Settings → *Remove Converter* has two buttons (each asks to confirm, then the app closes):
+- **Remove all data** deletes settings, downloaded engines and temp files (folders named `converter` in your config, data and cache folders; folders redirected with `CONVERTER_*` variables are never touched) and the start-at-login entry.
+- **Uninstall Converter** does that and removes the app: Linux deletes the `install.sh` install, macOS deletes `Converter.app` (or moves it to the Trash), Windows starts the installer's uninstaller.
+
+Without the app: Windows → Settings → Apps → Converter (it asks whether to delete data; silent `Uninstall.exe /S` keeps it, `/S /PURGE=1` deletes it).
+Linux → `~/.local/share/converter-desktop/uninstall.sh` (add `--purge` for data). macOS → drag the app to the Trash. Your converted files are never touched.
+
 ## System tray
 The app lives in the tray (Linux: StatusNotifierItem over D-Bus, so it needs a tray host: KDE, Cinnamon, XFCE,
 GNOME with the AppIndicator extension). Left-click opens the window; the menu has *Open Converter*, a

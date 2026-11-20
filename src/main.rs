@@ -15,6 +15,7 @@ mod runtime;
 mod settings;
 mod settings_page;
 mod theme;
+mod uninstall;
 mod tray;
 mod widgets;
 
