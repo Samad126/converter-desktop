@@ -98,22 +98,24 @@ impl PdfPage {
 impl gpui::Render for PdfPage {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tool = self.tool();
-        let list = div().id("pdf-tools").flex().flex_col().gap_1().w(px(210.)).h_full().p_3().border_r_1().border_color(BORDER).overflow_y_scroll()
+        let list = div().id("pdf-tools").flex().flex_col().gap_1().w(px(220.)).h_full().p_3().bg(tint(SURFACE, 0.5)).border_r_1().border_color(BORDER).overflow_y_scroll()
             .children(TOOLS.iter().enumerate().map(|(i, t)| {
                 let on = self.special.is_none() && i == self.selected;
-                div().id(SharedString::from(format!("tool-{}", t.op))).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(t.name)
-                    .when(on, |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI))
+                div().id(SharedString::from(format!("tool-{}", t.op))).flex().items_center().gap_2().h(px(32.)).px_3().rounded(px(6.)).cursor_pointer().text_sm().text_color(if on { TEXT } else { MUTED })
+                    .child(div().w(px(3.)).h(px(14.)).rounded_full().bg(if on { ACCENT } else { tint(ACCENT, 0.0) })).child(t.name)
+                    .when(on, |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI).text_color(TEXT))
                     .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
             }))
             .child(div().h(px(1.)).my_2().bg(BORDER))
             .children([(Special::Editor, "Edit, sign & redact"), (Special::Form, "Fill form"), (Special::Compare, "Compare")].into_iter().map(|(sp, name)| {
-                div().id(SharedString::from(format!("special-{name}"))).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(name)
-                    .when(self.special == Some(sp), |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI))
+                div().id(SharedString::from(format!("special-{name}"))).flex().items_center().gap_2().h(px(32.)).px_3().rounded(px(6.)).cursor_pointer().text_sm().text_color(if self.special == Some(sp) { TEXT } else { MUTED })
+                    .child(div().w(px(3.)).h(px(14.)).rounded_full().bg(if self.special == Some(sp) { ACCENT } else { tint(ACCENT, 0.0) })).child(name)
+                    .when(self.special == Some(sp), |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD)).hover(|s| s.bg(SURFACE_HI).text_color(TEXT))
                     .on_click(cx.listener(move |this, _, _, cx| { this.special = Some(sp); cx.notify(); }))
             }));
 
-        let drop_zone = div().id("pdf-drop").flex().items_center().justify_between().gap_3().p_4().rounded_lg().border_2().border_color(BORDER).bg(SURFACE)
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(SURFACE_HI))
+        let drop_zone = div().id("pdf-drop").flex().items_center().justify_between().gap_3().p_4().rounded(px(10.)).border_2().border_color(BORDER).bg(SURFACE)
+            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(tint(ACCENT, 0.10)))
             .on_drop(cx.listener(|this, p: &ExternalPaths, _, cx| this.add_files(p.paths(), cx)))
             .child(div().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(if tool.multi { "Drop files here" } else { "Drop a file here" }))
                 .child(div().text_sm().text_color(MUTED).child(if tool.accepts == Accepts::Pdf { "PDF" } else { "PNG or JPG images" })))
@@ -122,7 +124,7 @@ impl gpui::Render for PdfPage {
         let n = self.files.len();
         let file_rows = self.files.iter().enumerate().map(|(i, f)| {
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            div().flex().items_center().justify_between().gap_2().px_3().py_1().rounded_md().bg(SURFACE).border_1().border_color(BORDER)
+            div().flex().items_center().justify_between().gap_2().px_3().py_2().rounded(px(8.)).bg(SURFACE).border_1().border_color(BORDER)
                 .child(div().text_sm().child(format!("{}. {name}", i + 1)))
                 .child(div().flex().gap_1()
                     .when(tool.multi && i > 0, |d| d.child(button(SharedString::from(format!("up{i}")), "Up", false).on_click(cx.listener(move |t, _, _, cx| { t.files.swap(i, i - 1); cx.notify(); }))))
@@ -156,9 +158,8 @@ impl gpui::Render for PdfPage {
             }
         };
 
-        let panel = div().id("pdf-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(px(0.)).h_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child(tool.name))
-            .child(div().text_sm().text_color(MUTED).child(tool.desc))
+        let panel = div().id("pdf-panel").flex().flex_col().gap_4().px_8().py_7().flex_1().min_w(px(0.)).h_full().overflow_y_scroll()
+            .child(crate::page_header(tool.name, tool.desc))
             .child(drop_zone)
             .when(!file_rows.is_empty(), |d| d.child(div().flex().flex_col().gap_1().children(file_rows)))
             .children(fields)

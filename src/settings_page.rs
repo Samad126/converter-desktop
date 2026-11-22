@@ -1,6 +1,7 @@
 //! The Settings page. Every change is applied and saved immediately.
 use crate::theme::*;
-use crate::{autostart, button, settings};
+use crate::widgets::{segment, segments, switch};
+use crate::{autostart, button, page_body, page_header, settings};
 use gpui::{div, prelude::*, px, Context, FontWeight, PathPromptOptions, SharedString, Window};
 use std::sync::atomic::Ordering;
 
@@ -51,9 +52,11 @@ impl SettingsPage {
     }
 }
 
-fn section(title: &'static str, body: impl IntoElement) -> impl IntoElement {
-    div().flex().flex_col().gap_2().p_4().rounded_lg().bg(SURFACE).border_1().border_color(BORDER)
-        .child(div().font_weight(FontWeight::SEMIBOLD).child(title)).child(body)
+/// One setting: name and explanation on the left, its control on the right.
+fn row(title: &'static str, desc: impl Into<SharedString>, control: impl IntoElement) -> gpui::Div {
+    div().flex().justify_between().items_center().gap_6().p_4().border_b_1().border_color(BORDER)
+        .child(div().flex().flex_col().gap_1().flex_1().min_w(px(0.)).child(div().font_weight(FontWeight::SEMIBOLD).child(title)).child(div().text_sm().text_color(MUTED).child(desc.into())))
+        .child(div().flex_none().child(control))
 }
 
 impl gpui::Render for SettingsPage {
@@ -63,42 +66,35 @@ impl gpui::Render for SettingsPage {
         if autostart::SUPPORTED { s.autostart = autostart::is_enabled(); }
         let folder_text: SharedString = match &s.output_dir { Some(d) => d.display().to_string().into(), None => "Next to the original file".into() };
         let toggle = |id: &'static str, on: bool, cx: &mut Context<Self>, f: fn(&mut Self, bool, &mut Context<Self>)| {
-            div().flex().gap_1()
-                .child(button(SharedString::from(format!("{id}-on")), "On", on).on_click(cx.listener(move |t, _, _, cx| f(t, true, cx))))
-                .child(button(SharedString::from(format!("{id}-off")), "Off", !on).on_click(cx.listener(move |t, _, _, cx| f(t, false, cx))))
+            switch(id, on).on_click(cx.listener(move |t, _, _, cx| f(t, !on, cx)))
         };
-
-        div().id("settings-page").flex().flex_col().gap_3().p_5().size_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Settings"))
-            .child(section("Where results are saved", div().flex().flex_col().gap_2()
-                .child(div().text_sm().text_color(MUTED).child(folder_text))
-                .child(div().flex().gap_1()
-                    .child(button("out-same", "Next to the original", s.output_dir.is_none()).on_click(cx.listener(|t, _, _, cx| { settings::update(|s| s.output_dir = None); cx.notify(); let _ = t; })))
-                    .child(button("out-pick", "Choose a folder…", s.output_dir.is_some()).on_click(cx.listener(|t, _, _, cx| t.choose_folder(cx)))))))
-            .child(section("If a file with that name already exists", div().flex().flex_col().gap_2()
-                .child(div().text_sm().text_color(MUTED).child(if s.overwrite { "The old file is replaced." } else { "Both are kept: the new one gets \"(1)\" added to its name." }))
-                .child(div().flex().gap_1()
-                    .child(button("ow-keep", "Keep both", !s.overwrite).on_click(cx.listener(|_, _, _, cx| { settings::update(|s| s.overwrite = false); cx.notify(); })))
-                    .child(button("ow-replace", "Replace", s.overwrite).on_click(cx.listener(|_, _, _, cx| { settings::update(|s| s.overwrite = true); cx.notify(); }))))))
-            .child(section("Quick-convert ring", div().flex().flex_col().gap_2()
-                .child(div().text_sm().text_color(MUTED).child(if cfg!(target_os = "linux") { "Hold Ctrl while dragging files to open a ring of formats under the cursor." } else if cfg!(target_os = "macos") { "Hold Option while dragging files to open a ring of formats. Experimental here: needs the Accessibility permission and has not been tested on real Macs yet." } else { "Hold Ctrl while dragging files to open a ring of formats. Experimental on Windows: not tested on real hardware yet, so it is off by default." }))
-                .child(toggle("ring", s.ring, cx, Self::set_ring))))
-            .child(section("Start with this computer", div().flex().flex_col().gap_2()
-                .child(div().text_sm().text_color(MUTED).child(if autostart::SUPPORTED { "Launches hidden when you sign in, so the app (and the ring, where supported) is always ready." } else { "Not available on this platform." }))
-                .when(autostart::SUPPORTED, |d| d.child(toggle("auto", s.autostart, cx, Self::set_autostart)))))
-            .child(section("Remove Converter", div().flex().flex_col().gap_2()
-                .child(div().text_sm().text_color(MUTED).child(if cfg!(windows) { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall opens the uninstaller, which asks whether to delete them too." } else { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall does that and removes the app itself. Your converted files are never touched." }))
-                .child(match self.confirm {
-                    None => div().flex().gap_1()
-                        .child(button("rm-data", "Remove all data…", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::Data); cx.notify(); })))
-                        .child(button("rm-app", "Uninstall Converter…", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::App); cx.notify(); }))),
-                    Some(what) => div().flex().flex_col().gap_2()
-                        .child(div().text_sm().text_color(ERR).child(if what == Confirm::Data { "This cannot be undone and the app will close. Continue?" } else { "The app will be removed and closed. Continue?" }))
-                        .child(div().flex().gap_1()
-                            .child(button("rm-yes", "Yes, remove", true).on_click(cx.listener(move |t, _, _, cx| t.run_removal(what, cx))))
-                            .child(button("rm-no", "Cancel", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = None; cx.notify(); })))),
-                })))
-            .when_some(self.note.clone(), |d, (msg, ok)| d.child(div().text_sm().text_color(if ok { OK } else { ERR }).child(msg)))
-            .child(div().h(px(8.)))
+        let list = div().flex().flex_col().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().pb(px(-1.))
+            .child(row("Save results", folder_text, segments()
+                .child(segment("out-same", "Next to the original", s.output_dir.is_none()).on_click(cx.listener(|t, _, _, cx| { settings::update(|s| s.output_dir = None); cx.notify(); let _ = t; })))
+                .child(segment("out-pick", "Choose a folder…", s.output_dir.is_some()).on_click(cx.listener(|t, _, _, cx| t.choose_folder(cx))))))
+            .child(row("If a file with that name exists", if s.overwrite { "The old file is replaced." } else { "Both are kept: the new one gets \"(1)\" added to its name." }, segments()
+                .child(segment("ow-keep", "Keep both", !s.overwrite).on_click(cx.listener(|_, _, _, cx| { settings::update(|s| s.overwrite = false); cx.notify(); })))
+                .child(segment("ow-replace", "Replace", s.overwrite).on_click(cx.listener(|_, _, _, cx| { settings::update(|s| s.overwrite = true); cx.notify(); })))))
+            .child(row("Quick-convert ring", if cfg!(target_os = "linux") { "Hold Ctrl while dragging files to open a ring of formats under the cursor." } else if cfg!(target_os = "macos") { "Hold Option while dragging files to open a ring of formats. Experimental here: needs the Accessibility permission and has not been tested on real Macs yet." } else { "Hold Ctrl while dragging files to open a ring of formats. Experimental on Windows: not tested on real hardware yet, so it is off by default." },
+                toggle("ring", s.ring, cx, Self::set_ring)))
+            .child(row("Start with this computer", if autostart::SUPPORTED { "Launches hidden when you sign in, so the app (and the ring, where supported) is always ready." } else { "Not available on this platform." },
+                div().when(autostart::SUPPORTED, |d| d.child(toggle("auto", s.autostart, cx, Self::set_autostart)))));
+        let danger = div().flex().flex_col().gap_3().p_4().rounded(px(10.)).border_1().border_color(tint(ERR, 0.35))
+            .child(div().flex().flex_col().gap_1().child(div().font_weight(FontWeight::SEMIBOLD).child("Remove Converter"))
+                .child(div().text_sm().text_color(MUTED).child(if cfg!(windows) { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall opens the uninstaller, which asks whether to delete them too." } else { "Remove all data deletes your settings, downloaded engines and temporary files. Uninstall does that and removes the app itself. Your converted files are never touched." })))
+            .child(match self.confirm {
+                None => div().flex().gap_2()
+                    .child(button("rm-data", "Remove all data…", false).text_color(ERR).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::Data); cx.notify(); })))
+                    .child(button("rm-app", "Uninstall Converter…", false).text_color(ERR).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::App); cx.notify(); }))),
+                Some(what) => div().flex().flex_col().gap_2()
+                    .child(div().text_sm().text_color(ERR).child(if what == Confirm::Data { "This cannot be undone and the app will close. Continue?" } else { "The app will be removed and closed. Continue?" }))
+                    .child(div().flex().gap_2()
+                        .child(button("rm-yes", "Yes, remove", true).bg(ERR).text_color(ON_ACCENT).on_click(cx.listener(move |t, _, _, cx| t.run_removal(what, cx))))
+                        .child(button("rm-no", "Cancel", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = None; cx.notify(); })))),
+            });
+        page_body("settings-page", div().flex().flex_col().gap_4()
+            .child(page_header("Settings", "Changes apply and save immediately."))
+            .child(list).child(danger)
+            .when_some(self.note.clone(), |d, (msg, ok)| d.child(div().text_sm().text_color(if ok { OK } else { ERR }).child(msg))))
     }
 }

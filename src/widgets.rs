@@ -49,6 +49,31 @@ pub fn apply_key(value: &mut String, key: &str, ctrl: bool, clipboard: impl FnOn
     }
 }
 
+
+// ------------------------------------------------------------------ look-and-feel pieces
+
+/// A file type as a small tinted tile (`DOCX`, `PNG`), coloured by its family.
+pub fn ext_tile(ext: &str) -> gpui::Div {
+    let c = family_color(ext);
+    let label = if ext.is_empty() { "FILE".to_string() } else { ext.trim_start_matches('.').to_uppercase() };
+    div().flex().items_center().justify_center().h(px(22.)).px_2().rounded(px(5.)).bg(tint(c, 0.16)).text_color(c).text_xs().font_weight(gpui::FontWeight::BOLD).child(label)
+}
+
+/// An on/off switch. The caller adds `.on_click(..)`.
+pub fn switch(id: impl Into<ElementId>, on: bool) -> gpui::Stateful<gpui::Div> {
+    div().id(id).flex().items_center().w(px(38.)).h(px(22.)).p(px(3.)).rounded_full().cursor_pointer()
+        .bg(if on { ACCENT } else { BORDER }).when(on, |d| d.justify_end())
+        .child(div().size(px(16.)).rounded_full().bg(if on { ON_ACCENT } else { MUTED }))
+}
+
+/// A row of mutually exclusive choices; fill it with [`segment`]s.
+pub fn segments() -> gpui::Div { div().flex().gap(px(2.)).p(px(2.)).rounded(px(8.)).bg(BG).border_1().border_color(BORDER) }
+
+pub fn segment(id: impl Into<ElementId>, label: impl Into<SharedString>, on: bool) -> gpui::Stateful<gpui::Div> {
+    div().id(id).flex().items_center().h(px(26.)).px_3().rounded(px(6.)).text_sm().cursor_pointer().child(label.into())
+        .when(on, |d| d.bg(SURFACE_HI).text_color(TEXT).font_weight(gpui::FontWeight::SEMIBOLD)).when(!on, |d| d.text_color(MUTED).hover(|s| s.text_color(TEXT)))
+}
+
 // ------------------------------------------------------------------ the widget
 
 pub struct TextField { pub value: String, placeholder: SharedString, secret: bool, focus: FocusHandle, marked: Option<Range<usize>> }
@@ -125,7 +150,7 @@ impl gpui::Render for TextField {
         let shown: String = if self.secret { "•".repeat(self.value.chars().count()) } else { self.value.clone() };
         let handle = self.focus.clone();
         let catcher = InputCatcher { field: cx.entity(), focus: self.focus.clone() };
-        div().id("text-field").track_focus(&self.focus).relative().h(px(34.)).w_full().px_3().flex().items_center().rounded_md().text_sm()
+        div().id("text-field").track_focus(&self.focus).relative().h(px(34.)).w_full().px_3().flex().items_center().rounded(px(6.)).text_sm()
             .bg(SURFACE).border_1().border_color(if focused { ACCENT } else { BORDER }).cursor_text()
             .on_click(move |_, window, _| window.focus(&handle))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {

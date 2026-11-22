@@ -194,13 +194,13 @@ impl gpui::Render for PageEditor {
         let (show_w, show_h) = (SHOW_W, (size.1 as f32 * s).max(1.0));
 
         let drop = div().id("ed-drop").flex().flex_wrap().items_center().justify_between().gap_3().p_3().rounded_lg().border_2().border_color(BORDER).bg(SURFACE)
-            .drag_over::<ExternalPaths>(|st, _, _, _| st.border_color(ACCENT).bg(SURFACE_HI))
+            .drag_over::<ExternalPaths>(|st, _, _, _| st.border_color(ACCENT).bg(tint(ACCENT, 0.10)))
             .on_drop(cx.listener(|t, p: &ExternalPaths, _, cx| t.add(p.paths(), cx)))
             .child(div().font_weight(FontWeight::SEMIBOLD).child(self.file.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Drop a PDF here".into())))
             .child(button("ed-browse", "Browse…", false).on_click(cx.listener(|t, _, _, cx| t.browse(cx))));
         if self.file.is_none() {
             return div().id("editor-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(px(0.)).h_full().overflow_y_scroll()
-                .child(div().text_xl().font_weight(FontWeight::BOLD).child("Edit, sign & redact"))
+                .child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child("Edit, sign & redact"))
                 .child(div().text_sm().text_color(MUTED).child("Open a PDF, then write on it, draw, add a signature, or black out text for good."))
                 .child(drop).child(match &self.status { Status::Failed(m) => div().text_sm().text_color(ERR).child(m.clone()), _ => div() });
         }
@@ -268,7 +268,7 @@ impl gpui::Render for PageEditor {
         };
         let n = self.items.len();
         div().id("editor-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(px(0.)).h_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Edit, sign & redact"))
+            .child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child("Edit, sign & redact"))
             .child(drop).child(tools).child(div().text_sm().text_color(MUTED).child(tool_hint(self.tool)))
             .child(div().when(!self.tool.is_placed(), |d| d.invisible()).child(self.text.clone())).child(colors).child(nav).child(page_view)
             .child(div().flex().gap_2().items_center()

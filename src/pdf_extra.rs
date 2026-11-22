@@ -99,7 +99,7 @@ fn to_ui(f: FieldSummary, cx: &mut Context<FormPanel>) -> Option<UiField> {
 impl gpui::Render for FormPanel {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let drop = div().id("form-drop").flex().items_center().justify_between().gap_3().p_4().rounded_lg().border_2().border_color(BORDER).bg(SURFACE)
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(SURFACE_HI))
+            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(tint(ACCENT, 0.10)))
             .on_drop(cx.listener(|t, p: &ExternalPaths, _, cx| t.add(p.paths(), cx)))
             .child(div().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(self.file.as_deref().map(file_name).unwrap_or_else(|| "Drop a PDF form here".into())))
                 .child(div().text_sm().text_color(MUTED).child(if self.file.is_some() { format!("{} fillable fields", self.fields.len()) } else { "PDF with form fields".into() })))
@@ -126,7 +126,7 @@ impl gpui::Render for FormPanel {
                 .child(div().flex().child(button("form-reveal", "Show in folder", false).on_click(move |_, _, _| crate::jobs::reveal(&p)))) }
         };
         div().id("form-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(gpui::px(0.)).h_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Fill form"))
+            .child(div().text_size(gpui::px(22.)).font_weight(FontWeight::SEMIBOLD).child("Fill form"))
             .child(div().text_sm().text_color(MUTED).child("Fill in a PDF form. Flatten turns the filled values into ordinary page content."))
             .child(drop).children(rows)
             .when(!self.fields.is_empty(), |d| d.child(div().flex().gap_2()
@@ -202,7 +202,7 @@ impl gpui::Render for ComparePanel {
         let slot = |label: &'static str, f: &Option<PathBuf>| div().flex().flex_col().child(div().text_sm().text_color(MUTED).child(label))
             .child(div().font_weight(FontWeight::SEMIBOLD).child(f.as_deref().map(file_name).unwrap_or_else(|| "—".into())));
         let drop = div().id("cmp-drop").flex().flex_wrap().items_center().justify_between().gap_3().p_4().rounded_lg().border_2().border_color(BORDER).bg(SURFACE)
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(SURFACE_HI))
+            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(tint(ACCENT, 0.10)))
             .on_drop(cx.listener(|t, p: &ExternalPaths, _, cx| t.add(p.paths(), cx)))
             .child(div().flex().gap_6().child(slot("Original", &self.a)).child(slot("Changed", &self.b)))
             .child(div().flex().gap_1()
@@ -222,7 +222,7 @@ impl gpui::Render for ComparePanel {
             }
         };
         div().id("cmp-panel").flex().flex_col().gap_3().p_5().flex_1().min_w(gpui::px(0.)).h_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Compare"))
+            .child(div().text_size(gpui::px(22.)).font_weight(FontWeight::SEMIBOLD).child("Compare"))
             .child(div().text_sm().text_color(MUTED).child("Shows which lines of text were removed or added between two PDFs. Drop both files together."))
             .child(drop)
             .child(div().flex().child(button("cmp-run", "Compare", true).when(!ready, |b| b.opacity(0.45)).on_click(cx.listener(move |t, _, _, cx| { if ready { t.run(cx); } }))))

@@ -176,94 +176,147 @@ impl Converter {
 }
 
 pub fn button(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, primary: bool) -> gpui::Stateful<gpui::Div> {
-    div().id(id).px_3().py_1().rounded_md().text_sm().cursor_pointer().child(label.into())
+    div().id(id).flex().items_center().h(px(30.)).px_3().rounded(px(6.)).text_sm().cursor_pointer().child(label.into())
         .bg(if primary { ACCENT } else { SURFACE_HI }).text_color(if primary { ON_ACCENT } else { TEXT })
+        .when(primary, |d| d.font_weight(FontWeight::SEMIBOLD))
         .hover(move |s| s.bg(if primary { ACCENT_HI } else { BORDER }))
+        .active(|s| s.opacity(0.8))
+}
+
+/// A format the user can pick: tinted by its file family.
+fn format_chip(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, ext: &str) -> gpui::Stateful<gpui::Div> {
+    let c = family_color(ext);
+    div().id(id).flex().items_center().h(px(28.)).px_3().rounded(px(6.)).text_sm().cursor_pointer().child(label.into())
+        .bg(tint(c, 0.12)).text_color(c).border_1().border_color(tint(c, 0.25))
+        .hover(move |s| s.bg(tint(c, 0.24)).border_color(tint(c, 0.6)))
+        .active(|s| s.opacity(0.8))
 }
 
 fn progress_bar(frac: Option<f32>) -> impl IntoElement {
-    div().h(px(6.)).w_full().rounded_full().bg(BORDER).child(div().h_full().rounded_full().bg(ACCENT).w(relative(frac.unwrap_or(0.35).clamp(0.02, 1.0))))
+    div().h(px(4.)).w_full().rounded_full().bg(BORDER).child(div().h_full().rounded_full().bg(ACCENT).w(relative(frac.unwrap_or(0.35).clamp(0.02, 1.0))))
+}
+
+/// Page header used by every top-level page: title plus one muted sentence.
+pub fn page_header(title: impl Into<SharedString>, sub: impl Into<SharedString>) -> impl IntoElement {
+    div().flex().flex_col().gap_1().pb_2()
+        .child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(title.into()))
+        .child(div().text_sm().text_color(MUTED).child(sub.into()))
+}
+
+/// Scrollable page body: content stays a readable width and is centred in wide windows.
+pub fn page_body(id: &'static str, content: impl IntoElement) -> gpui::Stateful<gpui::Div> {
+    div().id(id).size_full().overflow_y_scroll().px_8().py_7()
+        .child(div().flex().flex_col().gap_4().w_full().max_w(px(760.)).mx_auto().child(content))
 }
 
 impl Render for Converter {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let nav = |page: Page, label: &'static str, cx: &mut Context<Self>| {
             let on = self.page == page;
-            div().id(label).px_3().py_2().rounded_md().cursor_pointer().text_sm().child(label)
+            div().id(label).flex().items_center().gap_2().h(px(34.)).px_3().rounded(px(6.)).cursor_pointer().text_sm().text_color(if on { TEXT } else { MUTED }).child(div().w(px(3.)).h(px(16.)).rounded_full().bg(if on { ACCENT } else { tint(ACCENT, 0.0) })).child(label)
                 .when(on, |d| d.bg(SURFACE_HI).font_weight(FontWeight::SEMIBOLD))
-                .hover(|s| s.bg(SURFACE_HI))
+                .hover(|s| s.bg(SURFACE_HI).text_color(TEXT))
                 .on_click(cx.listener(move |t, _, _, cx| { t.page = page; if page == Page::Engines { t.refresh_engines(true); } cx.notify(); }))
         };
+        let mark = div().flex().items_center().justify_center().size(px(26.)).rounded(px(7.)).bg(ACCENT).text_color(ON_ACCENT).font_weight(FontWeight::BOLD).child("→");
         div().flex().size_full().bg(BG).text_color(TEXT).font_family(FONT)
-            .child(div().flex().flex_col().gap_1().w(px(170.)).p_3().bg(SURFACE).border_r_1().border_color(BORDER)
-                .child(div().px_3().py_2().text_lg().font_weight(FontWeight::BOLD).child("Converter"))
+            .child(div().flex().flex_col().gap_1().w(px(200.)).py_4().px_3().bg(SURFACE).border_r_1().border_color(BORDER)
+                .child(div().flex().items_center().gap_2().px_3().pb_4().child(mark).child(div().text_size(px(16.)).font_weight(FontWeight::BOLD).child("Converter")))
                 .child(nav(Page::Convert, "Convert", cx)).child(nav(Page::Pdf, "PDF tools", cx)).child(nav(Page::Engines, "Engines", cx)).child(div().flex_1()).child(nav(Page::Settings, "Settings", cx)))
             .child(div().flex_1().h_full().overflow_hidden().child(match self.page { Page::Convert => self.convert_page(cx).into_any_element(), Page::Pdf => self.pdf.clone().into_any_element(), Page::Settings => self.settings.clone().into_any_element(), Page::Engines => self.engines_page(cx).into_any_element() }))
     }
 }
 
+/// The big target: highlights while files are dragged over it.
+pub fn drop_zone(id: &'static str, title: &'static str, hint: impl Into<SharedString>, cx: &mut App) -> gpui::Stateful<gpui::Div> {
+    let _ = cx;
+    div().id(id).flex().flex_col().items_center().justify_center().gap_1().py_8().rounded(px(12.)).border_2().border_color(BORDER).bg(SURFACE)
+        .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(tint(ACCENT, 0.10)))
+        .child(div().flex().items_center().gap_2().pb_2()
+            .child(widgets::ext_tile("docx")).child(div().text_color(MUTED).child("→")).child(widgets::ext_tile("pdf")))
+        .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(title))
+        .child(div().text_sm().text_color(MUTED).child(hint.into()))
+}
+
 impl Converter {
+    fn browse(&mut self, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await { this.update(cx, |t, cx| { t.add_files(&paths); cx.notify(); }).ok(); }
+        }).detach();
+    }
+
     fn convert_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let drop_zone = div().id("drop").flex().flex_col().items_center().justify_center().gap_1().h(px(130.)).rounded_lg().border_2().border_color(BORDER)
-            .bg(SURFACE).text_color(MUTED)
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.border_color(ACCENT).bg(SURFACE_HI))
+        let hint = match settings::get().output_dir { Some(d) => format!("Results are saved in {}.", d.display()), None => "Results are saved next to the original.".to_string() };
+        let drop_zone = drop_zone("drop", "Drop files to convert", hint, cx)
             .on_drop(cx.listener(|t, paths: &ExternalPaths, _, cx| { t.add_files(paths.paths()); cx.notify(); }))
-            .child(div().text_color(TEXT).font_weight(FontWeight::SEMIBOLD).child("Drop files here"))
-            .child(div().text_sm().child("documents, images, audio, video, PDFs, archives, data files…"));
+            .child(div().pt_3().child(button("browse", "Browse files", true).on_click(cx.listener(|t, _, _, cx| t.browse(cx)))));
+        let n = self.jobs.len();
         let rows = self.jobs.iter().enumerate().map(|(i, j)| {
             let name = j.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let body = match &j.status {
                 Status::Idle => {
                     let targets = jobs::targets_for(&j.ext);
                     if targets.is_empty() { div().text_sm().text_color(MUTED).child(format!("{} files can't be converted.", if j.ext.is_empty() { "These".into() } else { j.ext.clone() })).into_any_element() }
-                    else { div().flex().flex_wrap().gap_1().children(targets.into_iter().map(|(id, label)| {
+                    else { div().flex().flex_col().gap_2().child(div().text_sm().text_color(MUTED).child("Convert to"))
+                        .child(div().flex().flex_wrap().gap_2().children(targets.into_iter().map(|(id, label)| {
                         let missing = self.missing_engine(&j.ext, &id).is_some();
                         let tid = id.clone();
-                        button(SharedString::from(format!("t{i}-{id}")), label, false).when(missing, |b| b.opacity(0.45))
+                        format_chip(SharedString::from(format!("t{i}-{id}")), label, &id).when(missing, |b| b.opacity(0.45))
                             .on_click(cx.listener(move |t, _, _, cx| t.convert(i, tid.clone(), cx)))
-                    })).into_any_element() }
+                    }))).into_any_element() }
                 }
-                Status::Running(f) => div().flex().flex_col().gap_1().child(div().text_sm().text_color(MUTED).child(match f { Some(f) => format!("Converting… {:.0}%", f * 100.0), None => "Converting…".into() })).child(progress_bar(*f)).into_any_element(),
-                Status::Done(p) => div().flex().gap_2().items_center().child(div().text_sm().text_color(OK).child(format!("Saved {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
-                    .child(button(SharedString::from(format!("again{i}")), "Convert again", false).on_click(cx.listener(move |t, _, _, cx| { t.jobs[i].status = Status::Idle; cx.notify(); }))).into_any_element(),
+                Status::Running(f) => div().flex().flex_col().gap_2().child(div().text_sm().text_color(MUTED).child(match f { Some(f) => format!("Converting… {:.0}%", f * 100.0), None => "Converting…".into() })).child(progress_bar(*f)).into_any_element(),
+                Status::Done(p) => {
+                    let (p1, saved) = (p.clone(), p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                    div().flex().flex_wrap().items_center().gap_3()
+                        .child(div().size(px(8.)).rounded_full().bg(OK))
+                        .child(widgets::ext_tile(&j.ext)).child(div().text_color(MUTED).child("→")).child(widgets::ext_tile(&formats::extension_of(p)))
+                        .child(div().text_sm().text_color(OK).child(format!("Saved {saved}")))
+                        .child(div().flex_1())
+                        .child(button(SharedString::from(format!("show{i}")), "Show in folder", false).on_click(move |_, _, _| jobs::reveal(&p1)))
+                        .child(button(SharedString::from(format!("again{i}")), "Convert again", false).on_click(cx.listener(move |t, _, _, cx| { t.jobs[i].status = Status::Idle; cx.notify(); }))).into_any_element()
+                }
                 Status::Failed(msg, engine) => {
                     let engine = engine.clone();
-                    div().flex().flex_col().gap_1().child(div().text_sm().text_color(ERR).child(msg.clone()))
+                    div().flex().flex_col().gap_2().pl_3().border_l_2().border_color(ERR).child(div().text_sm().text_color(ERR).child(msg.clone()))
                         .child(div().flex().gap_2()
                             .when_some(engine.and_then(|e| engines::tool(&e).map(|t| t.name)), |d, name| d.child(button(SharedString::from(format!("inst{i}")), format!("Install {}", jobs::engine_label(name)), true)
                                 .on_click(cx.listener(move |t, _, _, cx| { t.page = Page::Engines; t.install(name, cx); t.jobs[i].status = Status::Idle; cx.notify(); }))))
                             .child(button(SharedString::from(format!("retry{i}")), "Try again", false).on_click(cx.listener(move |t, _, _, cx| { t.jobs[i].status = Status::Idle; cx.notify(); })))).into_any_element()
                 }
             };
-            div().flex().flex_col().gap_2().p_3().rounded_lg().bg(SURFACE).border_1().border_color(BORDER)
-                .child(div().flex().justify_between().child(div().font_weight(FontWeight::SEMIBOLD).child(name))
-                    .child(button(SharedString::from(format!("rm{i}")), "Remove", false).on_click(cx.listener(move |t, _, _, cx| { t.jobs.remove(i); cx.notify(); }))))
+            div().flex().flex_col().gap_3().p_4().when(i + 1 < n, |d| d.border_b_1().border_color(BORDER))
+                .child(div().flex().items_center().gap_3().child(widgets::ext_tile(&j.ext)).child(div().flex_1().min_w(px(0.)).overflow_hidden().font_weight(FontWeight::SEMIBOLD).child(name))
+                    .child(button(SharedString::from(format!("rm{i}")), "Remove", false).bg(tint(SURFACE_HI, 0.0)).text_color(MUTED).on_click(cx.listener(move |t, _, _, cx| { t.jobs.remove(i); cx.notify(); }))))
                 .child(body)
         }).collect::<Vec<_>>();
-        div().id("convert-page").flex().flex_col().gap_3().p_5().size_full().overflow_y_scroll().child(drop_zone)
-            .child(div().text_sm().text_color(MUTED).child(match settings::get().output_dir { Some(d) => format!("Pick a format for each file. Results are saved in {}.", d.display()), None => "Pick a format for each file. The result is saved next to the original.".to_string() }))
-            .children(rows)
+        page_body("convert-page", div().flex().flex_col().gap_4()
+            .child(page_header("Convert", "Drop in files, then pick the format you want for each."))
+            .child(drop_zone)
+            .when(n > 0, |d| d.child(div().flex().flex_col().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows))))
     }
 
     fn engines_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = self.engines.iter().map(|e| {
+        let n = self.engines.len();
+        let rows = self.engines.iter().enumerate().map(|(i, e)| {
             let name = e.name;
-            let right = match &e.state {
-                EngineState::Installed(p) => div().text_sm().text_color(OK).child(format!("Installed · {p}")).into_any_element(),
-                EngineState::Available(v, size) => div().flex().items_center().gap_2().child(div().text_sm().text_color(MUTED).child(format!("v{v} · {:.0} MB", *size as f64 / 1_048_576.0)))
-                    .child(button(SharedString::from(format!("get-{name}")), "Install", true).on_click(cx.listener(move |t, _, _, cx| t.install(name, cx)))).into_any_element(),
-                EngineState::Missing(hint) => div().text_sm().text_color(MUTED).child(format!("Not installed · {hint}")).into_any_element(),
-                EngineState::Installing(f, stage) => div().flex().flex_col().gap_1().w(px(220.)).child(div().text_sm().text_color(MUTED).child(format!("{stage}… {:.0}%", f * 100.0))).child(progress_bar(Some(*f))).into_any_element(),
-                EngineState::Failed(m) => div().text_sm().text_color(ERR).child(m.clone()).into_any_element(),
+            let (dot, right) = match &e.state {
+                EngineState::Installed(p) => (OK, div().text_sm().text_color(OK).child(format!("Installed · {p}")).into_any_element()),
+                EngineState::Available(v, size) => (ACCENT, div().flex().items_center().gap_3().child(div().text_sm().text_color(MUTED).child(format!("v{v} · {:.0} MB", *size as f64 / 1_048_576.0)))
+                    .child(button(SharedString::from(format!("get-{name}")), "Install", true).on_click(cx.listener(move |t, _, _, cx| t.install(name, cx)))).into_any_element()),
+                EngineState::Missing(hint) => (MUTED, div().text_sm().text_color(MUTED).child(format!("Not installed · {hint}")).into_any_element()),
+                EngineState::Installing(f, stage) => (ACCENT, div().flex().flex_col().gap_1().w(px(220.)).child(div().text_sm().text_color(MUTED).child(format!("{stage}… {:.0}%", f * 100.0))).child(progress_bar(Some(*f))).into_any_element()),
+                EngineState::Failed(m) => (ERR, div().text_sm().text_color(ERR).child(m.clone()).into_any_element()),
             };
-            div().flex().justify_between().items_center().gap_4().p_3().rounded_lg().bg(SURFACE).border_1().border_color(BORDER)
-                .child(div().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(name)).child(div().text_sm().text_color(MUTED).child(e.used_for)))
+            div().flex().justify_between().items_center().gap_4().p_4().when(i + 1 < n, |d| d.border_b_1().border_color(BORDER))
+                .child(div().flex().items_center().gap_3().child(div().size(px(8.)).rounded_full().bg(dot))
+                    .child(div().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(name)).child(div().text_sm().text_color(MUTED).child(e.used_for))))
                 .child(right)
         }).collect::<Vec<_>>();
-        div().id("engines-page").flex().flex_col().gap_3().p_5().size_full().overflow_y_scroll()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Engines"))
-            .child(div().text_sm().text_color(MUTED).child("Most conversions are built in and need nothing (Word, Excel, PowerPoint, PDF, HWP, images, archives, subtitles, data files). Helpers add higher fidelity or rarer formats; install them here, no admin rights needed."))
-            .children(rows)
+        page_body("engines-page", div().flex().flex_col().gap_4()
+            .child(page_header("Engines", "Most conversions are built in. Helpers add higher fidelity or rarer formats; install them here, no admin rights needed."))
+            .child(div().flex().flex_col().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows)))
     }
 }
 
