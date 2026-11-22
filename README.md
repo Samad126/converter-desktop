@@ -5,9 +5,18 @@ Native desktop app (Windows / Linux / macOS) for the converter, written in Rust 
 [converter-core](https://github.com/Samad126/converter-core).
 
 ## Status
-Early. Working: the Ctrl+drag quick-convert ring (below), tray, PDF tools page, Convert page (drop files, pick a target, progress, result saved next to the original),
-Most conversions are built in and need no installs (see the core README for the list); the Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
-verification). Planned: PDF tools screens, settings, autostart, Windows/macOS builds.
+Feature-complete on Linux: Convert page (drop or browse for files, pick a target per file, progress, result saved
+next to the original or in your chosen folder), PDF tools, Engines page (live status, one-click install with checksum
+verification), Settings, system tray, start with the computer, and the Ctrl+drag quick-convert ring. Most conversions are
+built in and need no installs (see the core README for the list). Windows and macOS builds compile and pass CI but
+have not been click-tested (see Platforms).
+
+## Look and feel
+Dark, warm-neutral palette with one periwinkle accent; all colours live in `src/theme.rs`. Files are recognised by a
+tinted format tile (DOCX, PNG, MP4 ...) coloured by family: documents blue, images violet, audio/video orange, data
+teal, archives yellow. A finished conversion shows source tile → result tile. The active page or tool in the sidebar
+gets a thin accent bar. Reusable pieces: `button`, `page_header`, `page_body`, `drop_zone` (`src/main.rs`) and
+`ext_tile`, `switch`, `segments`/`segment`, `TextField` (`src/widgets.rs`). The UI font is Noto Sans, bundled in the binary.
 
 ## Platforms
 CI builds and unit-tests every push on Linux, Windows and macOS (gpui, the core library and the app all compile
@@ -37,7 +46,7 @@ chip to convert (result saved next to the original); **Tab** or the **scroll whe
 cancels. Files that need an engine you haven't installed show dimmed, with the install hint in the result.
 
 Linux: X11 only (global input is read through XRecord). On Wayland the ring is unavailable (the app says so on
-stderr); use the drop zone or `converter-desktop <files>`. Windows/macOS are not implemented yet.
+stderr); use the drop zone or `converter-desktop <files>`. On Windows/macOS it is implemented but off by default and untested on real hardware.
 `converter-desktop --debug-gesture` prints the gestures the listener sees.
 
 ## PDF tools
@@ -51,8 +60,8 @@ rectangles, ellipses, lines, typed signatures (Dancing Script) and redactions th
 Save runs redact, then edit, then sign. Limits: pages are drawn unrotated, freehand and image stamps are not in the UI yet.
 
 ## Settings
-Output folder (or next to the original), keep-both vs replace when a result exists, the ring on/off, and start
-with the computer (Linux: an XDG autostart entry that launches `--background`). Saved to `settings.json` in the
+Shown as one list of rows: output folder (or next to the original) and keep-both vs replace when a result exists (choice
+groups), the ring and start with the computer (switches) (Linux: an XDG autostart entry that launches `--background`). Saved to `settings.json` in the
 config folder (`CONVERTER_CONFIG_DIR` overrides it) and applied immediately.
 
 ## Uninstalling
