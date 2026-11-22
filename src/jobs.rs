@@ -71,3 +71,22 @@ mod tests {
         assert!(targets_for(".wav").iter().any(|(id, _)| id == "media:mp3"));
     }
 }
+
+#[cfg(test)]
+mod builtin_tests {
+    use super::*;
+    #[test] fn built_in_formats_are_offered() {
+        let ids = |ext: &str| targets_for(ext).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        for t in ["pdf", "docx", "xlsx", "markdown", "txt", "hwpx"] { assert!(ids(".hwp").contains(&t.to_string()), "hwp -> {t}"); }
+        for t in ["txt", "docx", "xlsx", "png", "tiff", "cbz", "pptx"] { assert!(ids(".pdf").contains(&t.to_string()), "pdf -> {t}"); }
+        assert!(ids(".msg").contains(&"pdf".to_string()) && ids(".sbv").contains(&"srt".to_string()) && ids(".eot").contains(&"woff".to_string()));
+        assert!(ids(".dng").contains(&"jpg-image".to_string()) && ids(".lz4").contains(&"zip".to_string()));
+    }
+    #[test] fn a_built_in_pair_never_asks_for_an_install() {
+        // Even with an empty engines folder, nothing is missing for pairs the core can do itself.
+        let cfg = Config { engines_dir: std::env::temp_dir().join("no-engines-desktop-test"), ..Config::default() };
+        for (ext, t) in [(".hwp", "docx"), (".hwpx", "markdown"), (".msg", "txt"), (".sbv", "vtt"), (".lz4", "zip"), (".avro", "json"), (".dds", "png-image")] {
+            assert_eq!(missing_engine(&cfg, ext, t), None, "{ext} -> {t}");
+        }
+    }
+}

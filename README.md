@@ -6,7 +6,7 @@ Native desktop app (Windows / Linux / macOS) for the converter, written in Rust 
 
 ## Status
 Early. Working: the Ctrl+drag quick-convert ring (below), tray, PDF tools page, Convert page (drop files, pick a target, progress, result saved next to the original),
-Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
+Most conversions are built in and need no installs (see the core README for the list); the Engines page (live status; one-click install of pandoc, qpdf, 7zip, yt-dlp, ffmpeg with checksum
 verification). Planned: PDF tools screens, settings, autostart, Windows/macOS builds.
 
 ## Platforms

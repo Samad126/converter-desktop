@@ -262,7 +262,7 @@ impl Converter {
         }).collect::<Vec<_>>();
         div().id("engines-page").flex().flex_col().gap_3().p_5().size_full().overflow_y_scroll()
             .child(div().text_xl().font_weight(FontWeight::BOLD).child("Engines"))
-            .child(div().text_sm().text_color(MUTED).child("Some conversions use helper programs. Install them here; nothing needs admin rights."))
+            .child(div().text_sm().text_color(MUTED).child("Most conversions are built in and need nothing (Word, Excel, PowerPoint, PDF, HWP, images, archives, subtitles, data files). Helpers add higher fidelity or rarer formats; install them here, no admin rights needed."))
             .children(rows)
     }
 }
