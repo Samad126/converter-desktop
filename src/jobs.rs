@@ -22,9 +22,12 @@ pub fn common_targets(exts: &[String]) -> Vec<(String, String)> {
 
 /// The engine a target needs, when it is not installed yet.
 pub fn missing_engine(cfg: &Config, ext: &str, target: &str) -> Option<&'static str> {
-    let tool = if target.starts_with("media:") { "ffmpeg" } else { converter_core::pipelines::required_tool_for(&formats::resolve_conversion(ext, target)?)? };
-    let t = engines::tool(tool)?;
-    engines::resolve(t, cfg, None).is_none().then_some(t.name)
+    if target.starts_with("media:") {
+        let t = engines::tool("ffmpeg")?;
+        return engines::resolve(t, cfg, None).is_none().then_some(t.name);
+    }
+    // A conversion the built-in converters can do never asks for an install.
+    converter_core::pipelines::missing_tool(cfg, &formats::resolve_conversion(ext, target)?)
 }
 
 /// Starts a conversion with the settings as they are right now (output folder, overwrite behaviour).
