@@ -32,14 +32,24 @@ impl SettingsPage {
     /// Runs the removal, shows its message, then closes the app (it would otherwise re-create its settings file).
     fn run_removal(&mut self, what: Confirm, cx: &mut Context<Self>) {
         self.confirm = None;
-        let result = match what { Confirm::Data => crate::uninstall::remove_all_data(), Confirm::App => crate::uninstall::uninstall_app() };
-        match result {
-            Ok(done) => {
-                self.say(done.message, true, cx);
-                if done.quit { cx.spawn(async move |_, cx| { cx.background_executor().timer(std::time::Duration::from_millis(2500)).await; std::process::exit(0); }).detach(); }
+        self.say("Removing… this can take a minute if programs have to be uninstalled.", true, cx);
+        // Uninstalling packages can take a while: keep it off the UI thread.
+        let handle = crate::runtime::get().spawn_blocking(move || match what { Confirm::Data => crate::uninstall::remove_all_data(), Confirm::App => crate::uninstall::uninstall_app() });
+        if let Ok(mut s) = crate::uninstall::STATUS.lock() { s.clear(); }
+        cx.spawn(async move |this, cx| {
+            // Show which step is running; uninstalling a big program can take minutes.
+            while !handle.is_finished() {
+                cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+                let step = crate::uninstall::STATUS.lock().map(|s| s.clone()).unwrap_or_default();
+                if !step.is_empty() { this.update(cx, |t, cx| t.say(step, true, cx)).ok(); }
             }
-            Err(e) => self.say(format!("Could not finish: {e}"), false, cx),
-        }
+            let result = handle.await.map_err(|e| e.to_string()).and_then(|r| r);
+            let quit = this.update(cx, |t, cx| match result {
+                Ok(done) => { t.say(done.message, true, cx); done.quit }
+                Err(e) => { t.say(format!("Could not finish: {e}"), false, cx); false }
+            }).unwrap_or(false);
+            if quit { cx.background_executor().timer(std::time::Duration::from_millis(2500)).await; std::process::exit(0); }
+        }).detach();
     }
 
     fn choose_folder(&mut self, cx: &mut Context<Self>) {
@@ -87,7 +97,10 @@ impl gpui::Render for SettingsPage {
                     .child(button("rm-data", "Remove all data…", false).text_color(ERR).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::Data); cx.notify(); })))
                     .child(button("rm-app", "Uninstall Converter…", false).text_color(ERR).on_click(cx.listener(|t, _, _, cx| { t.confirm = Some(Confirm::App); cx.notify(); }))),
                 Some(what) => div().flex().flex_col().gap_2()
-                    .child(div().text_sm().text_color(ERR).child(if what == Confirm::Data { "This cannot be undone and the app will close. Continue?" } else { "The app will be removed and closed. Continue?" }))
+                    .child(div().text_sm().text_color(ERR).child(format!("{} {}", if what == Confirm::Data { "This cannot be undone and the app will close." } else { "The app will be removed and closed." }, {
+                        let names: Vec<_> = crate::uninstall::system_tools().into_iter().map(|(n, _)| n).collect();
+                        if names.is_empty() { "Continue?".to_string() } else { format!("It will also uninstall these programs from this computer, even if you installed them yourself: {}. Continue?", names.join(", ")) }
+                    })))
                     .child(div().flex().gap_2()
                         .child(button("rm-yes", "Yes, remove", true).bg(ERR).text_color(ON_ACCENT).on_click(cx.listener(move |t, _, _, cx| t.run_removal(what, cx))))
                         .child(button("rm-no", "Cancel", false).on_click(cx.listener(|t, _, _, cx| { t.confirm = None; cx.notify(); })))),

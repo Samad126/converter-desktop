@@ -67,11 +67,76 @@ fn remove_path(p: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Everything the app wrote: the start-at-login entry, then the data folders.
+/// Deletes one app folder, retrying briefly: antivirus scanners and just-exited helper processes often hold a file for a moment.
+fn purge_retry(d: &Path) -> Result<usize, String> {
+    let mut last = purge(std::slice::from_ref(&d.to_path_buf()));
+    for _ in 0..5 {
+        if last.is_ok() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        last = purge(std::slice::from_ref(&d.to_path_buf()));
+    }
+    last
+}
+
+/// Windows only: files in use cannot be deleted by their own process. Hand the leftovers to a hidden `cmd` that waits for this
+/// app to exit and then deletes them. Only folders already vetted by `is_app_dir` are ever passed in.
+#[cfg(windows)]
+fn delete_after_exit(dirs: &[PathBuf]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let mut script = String::from("ping -n 6 127.0.0.1 >nul");
+    for d in dirs { script.push_str(&format!(" & rmdir /s /q \"{}\"", d.display())); }
+    std::process::Command::new("cmd").arg("/C").raw_arg(&script).creation_flags(0x0800_0008) // CREATE_NO_WINDOW | DETACHED_PROCESS
+        .spawn().map(|_| ()).map_err(|e| format!("could not schedule the cleanup: {e}"))
+}
+#[cfg(not(windows))]
+fn delete_after_exit(_: &[PathBuf]) -> Result<(), String> { Err("files are in use".into()) }
+
+/// What the removal is doing right now, polled by the Settings page so a long uninstall does not look frozen.
+pub static STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+fn set_status(s: String) { if let Ok(mut g) = STATUS.lock() { *g = s; } }
+
+/// System-wide helper programs shown on the Engines page (found outside Converter's own folder) that can be uninstalled
+/// through winget/brew/apt. The Settings dialog lists these before the user confirms.
+pub fn system_tools() -> Vec<(&'static str, crate::sysinstall::Plan)> {
+    let cfg = converter_core::Config::default();
+    converter_core::engines::TOOLS.iter().filter_map(|t| {
+        let found = converter_core::engines::resolve(t, &cfg, None)?;
+        if found.starts_with(&cfg.engines_dir) { return None; } // our own copies go with the data folders
+        Some((t.name, crate::sysinstall::uninstall_plan(t.hint())?))
+    }).collect()
+}
+
+/// Uninstalls every tool from `system_tools`. Returns "" or a sentence naming what could not be removed.
+fn uninstall_system_tools() -> String {
+    let mut bad = Vec::new();
+    let tools = system_tools();
+    let n = tools.len();
+    for (i, (name, plan)) in tools.into_iter().enumerate() {
+        set_status(format!("Uninstalling {name} ({} of {n})… big programs can take a few minutes.", i + 1));
+        if let Err(e) = crate::sysinstall::run(&plan) { bad.push(format!("{name} ({e})")); }
+    }
+    if bad.is_empty() { String::new() } else { format!(" Could not uninstall: {}.", bad.join("; ")) }
+}
+
+/// Everything the app wrote: the start-at-login entry, then the data folders. Folders with files still in use are
+/// removed right after the app closes (Windows) instead of failing the whole operation.
 pub fn remove_all_data() -> Result<Done, String> {
     let _ = crate::autostart::set(false);
-    let n = purge(&data_dirs())?;
-    Ok(Done { message: if n == 0 { "There was no data to remove. Closing.".into() } else { "All settings, downloaded engines and temporary files were removed. Closing.".into() }, quit: true })
+    let leftover_note = uninstall_system_tools();
+    set_status("Deleting settings, downloaded engines and temporary files…".into());
+    let (mut removed, mut locked) = (0, Vec::new());
+    for d in data_dirs() {
+        match purge_retry(&d) {
+            Ok(n) => removed += n,
+            Err(e) if cfg!(windows) && d.exists() && is_app_dir(&d) => { let _ = e; locked.push(d); }
+            Err(e) => return Err(e),
+        }
+    }
+    if !locked.is_empty() {
+        delete_after_exit(&locked)?;
+        return Ok(Done { message: format!("Settings, engines and temporary files are being removed. A few were still in use and go as soon as Converter closes.{leftover_note} Closing."), quit: true });
+    }
+    Ok(Done { message: if removed == 0 && leftover_note.is_empty() { "There was no data to remove. Closing.".into() } else { format!("All settings, downloaded engines and temporary files were removed.{leftover_note} Closing.") }, quit: true })
 }
 
 /// Data plus the app. The app can delete its own files on Linux and macOS (the running program stays in memory);
@@ -82,8 +147,9 @@ pub fn uninstall_app() -> Result<Done, String> {
         return match windows_uninstaller(&exe) {
             Some(u) => {
                 let _ = crate::autostart::set(false);
+                let note = uninstall_system_tools();
                 std::process::Command::new(&u).spawn().map_err(|e| format!("Could not start the uninstaller: {e}"))?;
-                Ok(Done { message: "Starting the uninstaller. Closing.".into(), quit: true })
+                Ok(Done { message: format!("Starting the uninstaller.{note} Closing."), quit: true })
             }
             None => { let d = remove_all_data()?; Ok(Done { message: format!("{} This copy is the portable one: delete its folder to finish.", d.message.trim_end_matches(" Closing.")), quit: true }) }
         };

@@ -14,6 +14,7 @@ mod autostart;
 mod runtime;
 mod settings;
 mod settings_page;
+mod sysinstall;
 mod theme;
 mod uninstall;
 mod tray;
@@ -78,7 +79,9 @@ enum Page { Convert, Pdf, Engines, Settings }
 struct EngineRow { name: &'static str, used_for: &'static str, state: EngineState }
 
 #[derive(Clone, PartialEq)]
-enum EngineState { Installed(String), Available(String, u64), Missing(&'static str), Installing(f32, &'static str), Failed(String) }
+/// `Installed(label, removable)`: removable = we know how to uninstall it (its own folder, or a winget/brew/apt package).
+/// `Failed(message, was_removal)`.
+enum EngineState { Installed(String, bool), Available(String, u64), Missing(&'static str), Installing(f32, &'static str), Failed(String, bool) }
 
 struct Converter { page: Page, jobs: Vec<Job>, engines: Vec<EngineRow>, cfg: Arc<Config>, pdf: gpui::Entity<pdf_page::PdfPage>, settings: gpui::Entity<settings_page::SettingsPage> }
 
@@ -102,7 +105,11 @@ impl Converter {
             name: c.name, used_for: c.used_for,
             state: if installing.contains(&c.name) { EngineState::Installing(0.0, "Starting") } else {
                 match (c.installed_path, c.downloadable) {
-                    (Some(p), _) => EngineState::Installed(if p.starts_with(&self.cfg.engines_dir) { "installed by Converter".into() } else { format!("found on this computer ({})", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()) }),
+                    (Some(p), _) => {
+                        let own = p.starts_with(&self.cfg.engines_dir);
+                        let label = if own { "installed by Converter".to_string() } else { format!("found on this computer ({})", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()) };
+                        EngineState::Installed(label, own || sysinstall::uninstall_plan(c.hint).is_some())
+                    }
                     (None, Some(v)) => EngineState::Available(v, c.size.unwrap_or(0)),
                     (None, None) => EngineState::Missing(c.hint),
                 } },
@@ -150,6 +157,9 @@ impl Converter {
     }
 
     fn install(&mut self, name: &'static str, cx: &mut Context<Self>) {
+        // No portable download for this tool here: run the system package manager's command instead of asking the user to type it.
+        let hint = manager::catalog(&self.cfg).into_iter().find(|c| c.name == name).filter(|c| c.downloadable.is_none()).map(|c| c.hint);
+        if let Some(plan) = hint.and_then(sysinstall::plan) { return self.install_with_system(name, plan, cx); }
         if let Some(r) = self.engines.iter_mut().find(|e| e.name == name) { r.state = EngineState::Installing(0.0, "Starting"); }
         cx.notify();
         let state = Arc::new(Mutex::new((0.0f32, "Downloading")));
@@ -168,7 +178,66 @@ impl Converter {
             let result = handle.await;
             this.update(cx, |t, cx| {
                 t.refresh_engines(false);
-                if let Ok(Err(e)) = &result { if let Some(r) = t.engines.iter_mut().find(|e| e.name == name) { r.state = EngineState::Failed(e.message.clone()); } }
+                if let Ok(Err(e)) = &result { if let Some(r) = t.engines.iter_mut().find(|e| e.name == name) { r.state = EngineState::Failed(e.message.clone(), false); } }
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+}
+
+impl Converter {
+    /// Runs `winget` / `brew` / `apt` for a tool; the row shows an indeterminate bar (fraction < 0) until it exits.
+    fn install_with_system(&mut self, name: &'static str, plan: sysinstall::Plan, cx: &mut Context<Self>) {
+        let stage: &'static str = match sysinstall::manager_name(&plan) { "winget" => "Installing with winget", "brew" => "Installing with Homebrew", _ => "Installing with apt" };
+        if let Some(r) = self.engines.iter_mut().find(|e| e.name == name) { r.state = EngineState::Installing(-1.0, stage); }
+        cx.notify();
+        let handle = runtime::get().spawn_blocking(move || sysinstall::run(&plan));
+        cx.spawn(async move |this, cx| {
+            let result = handle.await;
+            this.update(cx, |t, cx| {
+                let failure = match result {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(m)) => Some(m),
+                    Err(e) => Some(e.to_string()),
+                };
+                t.refresh_engines(false);
+                // Installed but not found yet (a fresh PATH entry): say so rather than showing "Not installed" with no explanation.
+                let still_missing = t.engines.iter().find(|e| e.name == name).map(|e| !matches!(e.state, EngineState::Installed(..))).unwrap_or(false);
+                let msg = failure.or_else(|| still_missing.then(|| "Installed, but Converter cannot find it yet. Restart Converter and it should appear.".to_string()));
+                if let (Some(m), Some(r)) = (msg, t.engines.iter_mut().find(|e| e.name == name)) { r.state = EngineState::Failed(m, false); }
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    /// Uninstalls an engine: Converter's own downloaded copy, or the winget/brew/apt package of a system-wide one.
+    fn remove_engine(&mut self, name: &'static str, cx: &mut Context<Self>) {
+        let own = manager::catalog(&self.cfg).into_iter().find(|c| c.name == name).and_then(|c| c.installed_path).is_some_and(|p| p.starts_with(&self.cfg.engines_dir));
+        if let Some(r) = self.engines.iter_mut().find(|e| e.name == name) { r.state = EngineState::Installing(-1.0, "Removing"); }
+        cx.notify();
+        let cfg = self.cfg.clone();
+        let hint = converter_core::engines::tool(name).map(|t| t.hint());
+        let handle = runtime::get().spawn(async move {
+            if own { return manager::remove(&cfg, name).await.map_err(|e| e.message); }
+            let Some(plan) = hint.and_then(sysinstall::uninstall_plan) else { return Err("There is no automatic uninstall for this tool.".to_string()) };
+            tokio::task::spawn_blocking(move || sysinstall::run(&plan)).await.map_err(|e| e.to_string())??;
+            // Some uninstallers (Tesseract's, for one) hand off to a helper and exit before the files are gone: wait for them.
+            if let Some(tool) = converter_core::engines::tool(name) {
+                for _ in 0..24 {
+                    if converter_core::engines::resolve(tool, &cfg, None).is_none() { break; }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            }
+            Ok(())
+        });
+        cx.spawn(async move |this, cx| {
+            let result = handle.await.map_err(|e| e.to_string()).and_then(|r| r);
+            this.update(cx, |t, cx| {
+                t.refresh_engines(false);
+                // The package manager may report "nothing to do" for a program it did not install: say so instead of looking like nothing happened.
+                let still_there = t.engines.iter().find(|e| e.name == name).is_some_and(|e| matches!(e.state, EngineState::Installed(..)));
+                let msg = match result { Err(m) => Some(m), Ok(()) if still_there => Some("It is still installed. Remove it from Settings > Apps (Windows) or with your package manager.".to_string()), Ok(()) => None };
+                if let (Some(m), Some(r)) = (msg, t.engines.iter_mut().find(|e| e.name == name)) { r.state = EngineState::Failed(m, true); }
                 cx.notify();
             }).ok();
         }).detach();
@@ -205,8 +274,8 @@ pub fn page_header(title: impl Into<SharedString>, sub: impl Into<SharedString>)
 
 /// Scrollable page body: content stays a readable width and is centred in wide windows.
 pub fn page_body(id: &'static str, content: impl IntoElement) -> gpui::Stateful<gpui::Div> {
-    div().id(id).size_full().overflow_y_scroll().px_8().py_7()
-        .child(div().flex().flex_col().gap_4().w_full().max_w(px(760.)).mx_auto().child(content))
+    div().id(id).size_full().flex().items_start().overflow_y_scroll().px_8().py_7()
+        .child(div().flex().flex_col().gap_4().flex_none().w_full().max_w(px(760.)).mx_auto().child(content))
 }
 
 impl Render for Converter {
@@ -294,7 +363,7 @@ impl Converter {
         page_body("convert-page", div().flex().flex_col().gap_4()
             .child(page_header("Convert", "Drop in files, then pick the format you want for each."))
             .child(drop_zone)
-            .when(n > 0, |d| d.child(div().flex().flex_col().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows))))
+            .when(n > 0, |d| d.child(div().flex().flex_col().flex_none().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows))))
     }
 
     fn engines_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -302,21 +371,30 @@ impl Converter {
         let rows = self.engines.iter().enumerate().map(|(i, e)| {
             let name = e.name;
             let (dot, right) = match &e.state {
-                EngineState::Installed(p) => (OK, div().text_sm().text_color(OK).child(format!("Installed · {p}")).into_any_element()),
+                EngineState::Installed(p, removable) => (OK, div().flex().items_center().gap_3().child(div().text_sm().text_color(OK).child(format!("Installed · {p}")))
+                    .when(*removable, |d| d.child(button(SharedString::from(format!("rm-{name}")), "Uninstall", false).on_click(cx.listener(move |t, _, _, cx| t.remove_engine(name, cx))))).into_any_element()),
                 EngineState::Available(v, size) => (ACCENT, div().flex().items_center().gap_3().child(div().text_sm().text_color(MUTED).child(format!("v{v} · {:.0} MB", *size as f64 / 1_048_576.0)))
                     .child(button(SharedString::from(format!("get-{name}")), "Install", true).on_click(cx.listener(move |t, _, _, cx| t.install(name, cx)))).into_any_element()),
-                EngineState::Missing(hint) => (MUTED, div().text_sm().text_color(MUTED).child(format!("Not installed · {hint}")).into_any_element()),
+                EngineState::Missing(hint) if sysinstall::plan(hint).is_some() => (MUTED, div().flex().items_center().gap_3().child(div().text_sm().text_color(MUTED).child("Not installed"))
+                    .child(button(SharedString::from(format!("get-{name}")), "Install", true).on_click(cx.listener(move |t, _, _, cx| t.install(name, cx)))).into_any_element()),
+                EngineState::Missing(hint) => (MUTED, div().flex().items_center().gap_3().child(div().text_sm().text_color(MUTED).child(format!("Not installed · {hint}")))
+                    .when_some(sysinstall::download_page(name), |d, url| d.child(button(SharedString::from(format!("dl-{name}")), "Download page", false).on_click(cx.listener(move |_, _, _, cx| cx.open_url(url))))).into_any_element()),
+                EngineState::Installing(f, stage) if *f < 0.0 => (ACCENT, div().flex().flex_col().gap_1().w(px(220.)).child(div().text_sm().text_color(MUTED).child(format!("{stage}…"))).child(progress_bar(None)).into_any_element()),
                 EngineState::Installing(f, stage) => (ACCENT, div().flex().flex_col().gap_1().w(px(220.)).child(div().text_sm().text_color(MUTED).child(format!("{stage}… {:.0}%", f * 100.0))).child(progress_bar(Some(*f))).into_any_element()),
-                EngineState::Failed(m) => (ERR, div().text_sm().text_color(ERR).child(m.clone()).into_any_element()),
+                EngineState::Failed(m, was_removal) => { let was_removal = *was_removal; (ERR, div().flex().items_center().gap_3().child(div().text_sm().text_color(ERR).max_w(px(320.)).child(m.clone()))
+                    .child(button(SharedString::from(format!("retry-{name}")), "Try again", false).on_click(cx.listener(move |t, _, _, cx| if was_removal { t.remove_engine(name, cx) } else { t.install(name, cx) })))
+                    .when(!was_removal, |d| d.when_some(sysinstall::download_page(name), |d, url| d.child(button(SharedString::from(format!("dl-{name}")), "Download page", false).on_click(cx.listener(move |_, _, _, cx| cx.open_url(url)))))).into_any_element()) }
             };
             div().flex().justify_between().items_center().gap_4().p_4().when(i + 1 < n, |d| d.border_b_1().border_color(BORDER))
-                .child(div().flex().items_center().gap_3().child(div().size(px(8.)).rounded_full().bg(dot))
-                    .child(div().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(name)).child(div().text_sm().text_color(MUTED).child(e.used_for))))
-                .child(right)
+                // Left side may shrink and wrap; the status on the right keeps its size up to a cap and wraps beyond it,
+                // so a long status or a narrow window never pushes text off the edge.
+                .child(div().flex().flex_1().min_w_0().items_center().gap_3().child(div().flex_none().size(px(8.)).rounded_full().bg(dot))
+                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().font_weight(FontWeight::SEMIBOLD).child(name)).child(div().text_sm().text_color(MUTED).child(e.used_for))))
+                .child(div().flex().flex_none().max_w(px(380.)).justify_end().child(right))
         }).collect::<Vec<_>>();
         page_body("engines-page", div().flex().flex_col().gap_4()
-            .child(page_header("Engines", "Most conversions are built in. Helpers add higher fidelity or rarer formats; install them here, no admin rights needed."))
-            .child(div().flex().flex_col().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows)))
+            .child(page_header("Engines", "Most conversions are built in. Helpers add higher fidelity or rarer formats; install them here. Some installs (winget, apt) may ask for administrator permission."))
+            .child(div().flex().flex_col().flex_none().rounded(px(10.)).bg(SURFACE).border_1().border_color(BORDER).overflow_hidden().children(rows)))
     }
 }
 
