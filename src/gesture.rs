@@ -182,6 +182,20 @@ mod rdev_backend {
     }
 }
 
+/// Global pointer positions are physical pixels on Windows; gpui window bounds are logical (DIPs).
+/// Uses the system DPI (exact on the primary monitor; monitors with a different scale may be slightly off).
+pub fn to_logical(x: i32, y: i32) -> (i32, i32) {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" { fn GetDpiForSystem() -> u32; }
+        let k = 96.0 / (unsafe { GetDpiForSystem() }.max(96) as f32);
+        return ((x as f32 * k).round() as i32, (y as f32 * k).round() as i32);
+    }
+    #[cfg(not(windows))]
+    (x, y)
+}
+
 /// Starts the global listener on its own thread. Returns an error string when the platform cannot do it
 /// (Wayland, missing RECORD extension, unsupported OS) so the UI can say so instead of silently doing nothing.
 pub fn listen(on_gesture: impl FnMut(Gesture) + Send + 'static) -> Result<(), String> {

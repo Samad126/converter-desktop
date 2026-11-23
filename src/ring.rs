@@ -43,6 +43,16 @@ pub fn slot_center(k: usize, n: usize, radius: f32, cx: f32, cy: f32) -> (f32, f
     (cx + radius * a.cos(), cy + radius * a.sin())
 }
 
+/// Top-left of a `win`-sized window centred on `(x, y)`, pushed back inside `screen` = (left, top, width, height)
+/// so the ring is never cut off when the cursor is near a corner or edge.
+pub fn clamp_origin(x: f32, y: f32, win: f32, screen: (f32, f32, f32, f32), margin: f32) -> (f32, f32) {
+    let fit = |c: f32, lo: f32, len: f32| {
+        let (min, max) = (lo + margin, lo + len - win - margin);
+        if max < min { lo } else { (c - win / 2.0).clamp(min, max) }
+    };
+    (fit(x, screen.0, screen.2), fit(y, screen.1, screen.3))
+}
+
 pub fn hit(centers: &[(f32, f32)], w: f32, h: f32, p: (f32, f32)) -> Option<usize> {
     centers.iter().position(|(cx, cy)| (p.0 - cx).abs() <= w / 2.0 && (p.1 - cy).abs() <= h / 2.0)
 }
@@ -147,9 +157,37 @@ impl Ring {
 }
 
 /// Opens the ring centred on a screen position.
+/// Windows 11 draws a thin border, rounded corners and a shadow around every top-level window, which shows up as a
+/// grey box behind the ring. Ask DWM to drop all three.
+#[cfg(windows)]
+fn strip_frame(window: &Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    #[link(name = "dwmapi")]
+    extern "system" { fn DwmSetWindowAttribute(hwnd: isize, attr: u32, value: *const core::ffi::c_void, size: u32) -> i32; }
+    let Ok(h) = HasWindowHandle::window_handle(window) else { return };
+    let RawWindowHandle::Win32(w) = h.as_raw() else { return };
+    let hwnd = w.hwnd.get();
+    let set = |attr: u32, v: u32| unsafe { DwmSetWindowAttribute(hwnd, attr, &v as *const u32 as *const _, 4) };
+    set(33, 1);           // DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_DONOTROUND
+    set(34, 0xFFFF_FFFE); // DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE
+    set(2, 1);            // DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED (no shadow)
+}
+#[cfg(not(windows))]
+fn strip_frame(_: &Window) {}
+
 pub fn open(x: i32, y: i32, cfg: Arc<Config>, cx: &mut App) {
     close(cx);
-    let bounds = Bounds { origin: point(px(x as f32 - WIN / 2.0), px(y as f32 - WIN / 2.0)), size: size(px(WIN), px(WIN)) };
+    // Keep the whole ring on the monitor the cursor is on (corners and edges would otherwise clip it).
+    let (fx, fy) = (x as f32, y as f32);
+    let screen = cx.displays().into_iter().map(|d| d.bounds()).find(|b| {
+        let (l, t) = (f32::from(b.origin.x), f32::from(b.origin.y));
+        fx >= l && fy >= t && fx < l + f32::from(b.size.width) && fy < t + f32::from(b.size.height)
+    });
+    let (ox, oy) = match screen {
+        Some(b) => clamp_origin(fx, fy, WIN, (f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)), 8.0),
+        None => (fx - WIN / 2.0, fy - WIN / 2.0),
+    };
+    let bounds = Bounds { origin: point(px(ox), px(oy)), size: size(px(WIN), px(WIN)) };
     let opened = cx.open_window(WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: None,
@@ -157,9 +195,11 @@ pub fn open(x: i32, y: i32, cfg: Arc<Config>, cx: &mut App) {
         focus: false,
         is_movable: false,
         is_resizable: false,
-        window_background: WindowBackgroundAppearance::Transparent,
+        // On Windows gpui's `Transparent` turns on a tinted accent gradient that shows as a grey box around the ring;
+        // the swap chain already carries per-pixel alpha, so leave the accent effect off there.
+        window_background: if cfg!(windows) { WindowBackgroundAppearance::Opaque } else { WindowBackgroundAppearance::Transparent },
         ..Default::default()
-    }, |window, cx| { let handle = window.window_handle(); cx.new(|_| { let mut r = Ring::new(cfg); r.window = Some(handle); r }) });
+    }, |window, cx| { strip_frame(window); let handle = window.window_handle(); cx.new(|_| { let mut r = Ring::new(cfg); r.window = Some(handle); r }) });
     if let Ok(handle) = opened { cx.set_global(Current(Some(handle))); }
 }
 
@@ -232,6 +272,17 @@ impl Render for Ring {
 mod tests {
     use super::*;
     fn t(id: &str, label: &str) -> (String, String) { (id.into(), label.into()) }
+
+    #[test] fn ring_stays_on_screen_in_corners_and_edges() {
+        let s = (0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!(clamp_origin(960.0, 540.0, 480.0, s, 8.0), (720.0, 300.0), "centred when there is room");
+        assert_eq!(clamp_origin(5.0, 5.0, 480.0, s, 8.0), (8.0, 8.0), "top-left corner");
+        assert_eq!(clamp_origin(1915.0, 1075.0, 480.0, s, 8.0), (1432.0, 592.0), "bottom-right corner");
+        assert_eq!(clamp_origin(960.0, 1070.0, 480.0, s, 8.0).1, 592.0, "bottom edge only moves y");
+        let second = (1920.0, 0.0, 1280.0, 720.0);
+        assert_eq!(clamp_origin(1925.0, 400.0, 480.0, second, 8.0).0, 1928.0, "second monitor uses its own origin");
+        assert_eq!(clamp_origin(100.0, 100.0, 480.0, (0.0, 0.0, 300.0, 300.0), 8.0), (0.0, 0.0), "screen smaller than the ring");
+    }
 
     #[test] fn popular_targets_come_first_then_alphabetical() {
         let r = rank(vec![t("zip", "ZIP"), t("odt", "ODT"), t("pdf", "PDF"), t("bmp", "BMP"), t("docx", "DOCX")]);

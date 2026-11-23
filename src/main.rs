@@ -343,7 +343,7 @@ fn start_background(cx: &mut App) -> bool {
                 AppEvent::SetRing(on) => { settings::RING_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed); settings::update(|s| s.ring = on); if !on { ring::close(cx); } }
                 AppEvent::Gesture(_) if !settings::RING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) => {}
                 AppEvent::Gesture(g) => match g {
-                    gesture::Gesture::Open { x, y } => ring::open(x, y, cfg, cx),
+                    gesture::Gesture::Open { x, y } => { let (x, y) = gesture::to_logical(x, y); ring::open(x, y, cfg, cx) }
                     gesture::Gesture::Page(d) => { if let Some(h) = cx.try_global::<ring::Current>().and_then(|c| c.0) { let _ = h.update(cx, |r, _, cx| r.flip(d, cx)); } }
                     gesture::Gesture::Cancel => ring::close(cx),
                     gesture::Gesture::Released => {
