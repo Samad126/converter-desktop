@@ -38,7 +38,7 @@ too. Still from your package manager on Linux: LibreOffice, Tesseract (OCR), hei
 
 Without a tray, closing the window quits the app. Release packages (binary + the Python scripts it looks for next
 to itself) are built by the *Release build* workflow: run it manually for downloadable artifacts, or push a `v*` tag
-to attach them to a GitHub pre-release. macOS builds are unsigned (right-click → Open the first time) and come in two flavours: `macos-arm64` (Apple Silicon) and `macos-x86_64` (Intel Macs, including Hackintosh).
+to attach them to a GitHub release. macOS builds are unsigned (right-click → Open the first time) and come in two flavours: `macos-arm64` (Apple Silicon) and `macos-x86_64` (Intel Macs, including Hackintosh).
 
 ## Quick-convert ring
 Hold **Ctrl**, drag files out of a file manager, and a ring of format chips opens under the cursor. Drop on a
