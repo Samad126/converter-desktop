@@ -17,7 +17,10 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\converter-desktop.exe"
+; Start the app through Explorer so it runs with the normal user token even when this setup was run as administrator
+; (an elevated Converter cannot receive drag-and-drop from Explorer, which breaks the Ctrl+drag ring).
+!define MUI_FINISHPAGE_RUN "$WINDIR\explorer.exe"
+!define MUI_FINISHPAGE_RUN_PARAMETERS '"$INSTDIR\converter-desktop.exe"'
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -26,6 +29,7 @@ SetCompressor /SOLID lzma
 Section "Install"
   ; Stop a running copy so the exe can be replaced.
   nsExec::Exec 'taskkill /F /IM converter-desktop.exe'
+  Sleep 800 ; let Windows release the exe before it is overwritten
   SetOutPath "$INSTDIR"
   File /r "${SRC}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -44,6 +48,7 @@ SectionEnd
 
 Section "Uninstall"
   nsExec::Exec 'taskkill /F /IM converter-desktop.exe'
+  Sleep 800
   Delete "$SMPROGRAMS\Converter.lnk"
   ; Autostart value written by the app's own setting.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Converter"

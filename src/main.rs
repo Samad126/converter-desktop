@@ -3,6 +3,7 @@
 
 //! Converter desktop app (gpui). Screens: Convert (drop files, pick a target) and Engines.
 mod editor_model;
+mod elevation;
 mod gesture;
 mod jobs;
 mod page_editor;
@@ -445,6 +446,9 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--debug-gesture") {
         match gesture::listen(|g| println!("{g:?}")) { Ok(()) => loop { std::thread::sleep(std::time::Duration::from_secs(3600)) }, Err(e) => { eprintln!("{e}"); std::process::exit(1) } }
     }
+    // Never run elevated: an administrator process cannot receive drags from a normal Explorer (empty ring, refused drops).
+    // Started by hand with arguments we leave it alone; a plain launch hands over to a normal copy started through Explorer.
+    if std::env::args().len() == 1 && elevation::running_elevated() && elevation::relaunch_unelevated() { return; }
     // `--background`: start hidden in the tray (for autostart). Ignored when there is no tray, so the app is never invisible.
     let background = std::env::args().skip(1).any(|a| a == "--background");
     let files: Vec<PathBuf> = std::env::args_os().skip(1).filter(|a| a != "--background").map(PathBuf::from).collect();
